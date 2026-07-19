@@ -274,6 +274,49 @@ func Run(
 
 		return 0
 
+	case "push":
+		if len(args) > 2 {
+			fmt.Fprintln(
+				stderr,
+				"usage: dotmgr push [remote]",
+			)
+			return 2
+		}
+
+		remoteName := "origin"
+		if len(args) == 2 {
+			remoteName = args[1]
+		}
+
+		repositoryPath, err := paths.Repository()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		pushed, err := gitstore.Push(
+			repositoryPath,
+			remoteName,
+			stderr,
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		if !pushed {
+			fmt.Fprintln(stdout, "Everything up-to-date.")
+			return 0
+		}
+
+		fmt.Fprintf(
+			stdout,
+			"Pushed current branch to %s.\n",
+			remoteName,
+		)
+
+		return 0
+
 	case "remote":
 		if len(args) < 2 {
 			fmt.Fprintln(
@@ -522,11 +565,13 @@ Commands:
               Read or set repository-local configuration
   commit -m <message>
               Commit staged repository changes
-  repo-path   Show the local repository path
   remote add <name> <url>
               Add a Git remote
   remote list
               List configured Git remotes
+  push [remote]
+              Push the current branch; defaults to origin
+  repo-path   Show the local repository path
   platform    Show the operating system and architecture
   version     Show version information
   help        Show this help`)
