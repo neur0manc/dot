@@ -9,6 +9,80 @@ import (
 	"git.sr.ht/~stephan/dotmgr/internal/manifest"
 )
 
+func createTrackedTestFile(
+	t *testing.T,
+	content string,
+) (repositoryPath string, homeDirectory string, inputPath string) {
+	t.Helper()
+
+	root := t.TempDir()
+	homeDirectory = filepath.Join(root, "home")
+	repositoryPath = filepath.Join(root, "repository")
+
+	if err := os.MkdirAll(homeDirectory, 0o755); err != nil {
+		t.Fatalf("create home directory: %v", err)
+	}
+
+	if err := gitstore.Init(repositoryPath); err != nil {
+		t.Fatalf("initialize repository: %v", err)
+	}
+
+	inputPath = filepath.Join(
+		homeDirectory,
+		".vim",
+		"vimrc",
+	)
+
+	if err := os.MkdirAll(filepath.Dir(inputPath), 0o755); err != nil {
+		t.Fatalf("create input directory: %v", err)
+	}
+
+	if err := os.WriteFile(
+		inputPath,
+		[]byte(content),
+		0o600,
+	); err != nil {
+		t.Fatalf("write input file: %v", err)
+	}
+
+	if _, err := Add(
+		repositoryPath,
+		homeDirectory,
+		inputPath,
+	); err != nil {
+		t.Fatalf("add input file: %v", err)
+	}
+
+	return repositoryPath, homeDirectory, inputPath
+}
+
+func TestLocalStatusesDetectsSynchronizedFile(t *testing.T) {
+	repositoryPath, homeDirectory, _ := createTrackedTestFile(
+		t,
+		"set number\n",
+	)
+
+	statuses, err := LocalStatuses(
+		repositoryPath,
+		homeDirectory,
+	)
+	if err != nil {
+		t.Fatalf("read local statuses: %v", err)
+	}
+
+	if len(statuses) != 1 {
+		t.Fatalf("expected one status, got %d", len(statuses))
+	}
+
+	if statuses[0].State != LocalClean {
+		t.Fatalf(
+			"expected state %q, got %q",
+			LocalClean,
+			statuses[0].State,
+		)
+	}
+}
+
 func TestAddCopiesRecordsAndStagesFile(t *testing.T) {
 	root := t.TempDir()
 	homeDirectory := filepath.Join(root, "home")
@@ -195,5 +269,104 @@ func TestAddRejectsFileOutsideHome(t *testing.T) {
 		outsideFile,
 	); err == nil {
 		t.Fatal("expected a file outside home to be rejected")
+	}
+}
+
+func TestLocalStatusesDetectsModifiedFile(t *testing.T) {
+	repositoryPath, homeDirectory, inputPath :=
+		createTrackedTestFile(t, "set number\n")
+
+	if err := os.WriteFile(
+		inputPath,
+		[]byte("set number\nset ruler\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("modify deployed file: %v", err)
+	}
+
+	statuses, err := LocalStatuses(
+		repositoryPath,
+		homeDirectory,
+	)
+	if err != nil {
+		t.Fatalf("read local statuses: %v", err)
+	}
+
+	if len(statuses) != 1 {
+		t.Fatalf("expected one status, got %d", len(statuses))
+	}
+
+	if statuses[0].State != LocalModified {
+		t.Fatalf(
+			"expected state %q, got %q",
+			LocalModified,
+			statuses[0].State,
+		)
+	}
+}
+
+func TestLocalStatusesDetectsNotAppliedFile(t *testing.T) {
+	repositoryPath, homeDirectory, inputPath :=
+		createTrackedTestFile(t, "set number\n")
+
+	if err := os.Remove(inputPath); err != nil {
+		t.Fatalf("remove deployed file: %v", err)
+	}
+
+	statuses, err := LocalStatuses(
+		repositoryPath,
+		homeDirectory,
+	)
+	if err != nil {
+		t.Fatalf("read local statuses: %v", err)
+	}
+
+	if len(statuses) != 1 {
+		t.Fatalf("expected one status, got %d", len(statuses))
+	}
+
+	if statuses[0].State != LocalNotApplied {
+		t.Fatalf(
+			"expected state %q, got %q",
+			LocalNotApplied,
+			statuses[0].State,
+		)
+	}
+}
+
+func TestLocalStatusesDetectsMissingRepositorySource(t *testing.T) {
+	repositoryPath, homeDirectory, _ :=
+		createTrackedTestFile(t, "set number\n")
+
+	sourcePath := filepath.Join(
+		repositoryPath,
+		"files",
+		"home",
+		".vim",
+		"vimrc",
+	)
+
+	if err := os.Remove(sourcePath); err != nil {
+		t.Fatalf("remove repository source: %v", err)
+	}
+
+	statuses, err := LocalStatuses(
+		repositoryPath,
+		homeDirectory,
+	)
+	if err != nil {
+		t.Fatalf("read local statuses: %v", err)
+	}
+
+	if len(statuses) != 1 {
+		t.Fatalf("expected one status, got %d", len(statuses))
+	}
+
+	if statuses[0].State != LocalSourceMissing {
+		t.Fatalf(
+			"expected state %q, got %q",
+			LocalSourceMissing,
+			statuses[0].State,
+		)
 	}
 }

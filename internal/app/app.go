@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strings"
 
 	"git.sr.ht/~stephan/dotmgr/internal/gitstore"
 	"git.sr.ht/~stephan/dotmgr/internal/paths"
@@ -117,24 +118,114 @@ func Run(
 			return 1
 		}
 
-		status, err := gitstore.Status(repositoryPath)
+		homeDirectory, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(
+				stderr,
+				"error: determine home directory: %v\n",
+				err,
+			)
+			return 1
+		}
+
+		localStatuses, err := tracking.LocalStatuses(
+			repositoryPath,
+			homeDirectory,
+		)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 1
 		}
 
-		if status.IsClean() {
-			fmt.Fprintln(stdout, "Repository is clean.")
-			return 0
+		repositoryStatus, err := gitstore.Status(repositoryPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
 		}
 
-		fmt.Fprint(stdout, status.String())
-		return 0
+		printLocalStatuses(stdout, localStatuses)
+		fmt.Fprintln(stdout)
+		printRepositoryStatus(stdout, repositoryStatus.String())
 
+		return 0
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
 		printUsage(stderr)
 		return 2
+	}
+}
+
+func printLocalStatuses(
+	output io.Writer,
+	statuses []tracking.LocalFileStatus,
+) {
+	fmt.Fprintln(output, "Managed files:")
+
+	if len(statuses) == 0 {
+		fmt.Fprintln(output, "  no managed files")
+		return
+	}
+
+	changes := 0
+
+	for _, status := range statuses {
+		switch status.State {
+		case tracking.LocalClean:
+			continue
+
+		case tracking.LocalModified:
+			fmt.Fprintf(
+				output,
+				"  M  %s\n",
+				status.Entry.Target,
+			)
+
+		case tracking.LocalNotApplied:
+			fmt.Fprintf(
+				output,
+				"  N  %s (not applied)\n",
+				status.Entry.Target,
+			)
+
+		case tracking.LocalSourceMissing:
+			fmt.Fprintf(
+				output,
+				"  !  %s (repository source missing: %s)\n",
+				status.Entry.Target,
+				status.Entry.Source,
+			)
+
+		case tracking.LocalUnsupported:
+			fmt.Fprintf(
+				output,
+				"  !  %s (unsupported file type)\n",
+				status.Entry.Target,
+			)
+		}
+
+		changes++
+	}
+
+	if changes == 0 {
+		fmt.Fprintln(output, "  all files are in sync")
+	}
+}
+
+func printRepositoryStatus(
+	output io.Writer,
+	statusText string,
+) {
+	fmt.Fprintln(output, "Repository:")
+
+	statusText = strings.TrimSpace(statusText)
+
+	if statusText == "" {
+		fmt.Fprintln(output, "  clean")
+		return
+	}
+
+	for _, line := range strings.Split(statusText, "\n") {
+		fmt.Fprintf(output, "  %s\n", line)
 	}
 }
 
