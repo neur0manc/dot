@@ -111,6 +111,40 @@ func Run(
 		)
 		return 0
 
+	case "diff":
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "usage: dotmgr diff")
+			return 2
+		}
+
+		repositoryPath, err := paths.Repository()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		homeDirectory, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(
+				stderr,
+				"error: determine home directory: %v\n",
+				err,
+			)
+			return 1
+		}
+
+		diffs, err := tracking.LocalDiffs(
+			repositoryPath,
+			homeDirectory,
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		printLocalDiffs(stdout, diffs)
+		return 0
+
 	case "status":
 		repositoryPath, err := paths.Repository()
 		if err != nil {
@@ -229,6 +263,78 @@ func printRepositoryStatus(
 	}
 }
 
+func printLocalDiffs(
+	output io.Writer,
+	diffs []tracking.LocalFileDiff,
+) {
+	for index, fileDiff := range diffs {
+		if index > 0 {
+			fmt.Fprintln(output)
+		}
+
+		switch fileDiff.State {
+		case tracking.LocalModified:
+			fmt.Fprintf(
+				output,
+				"diff --dotmgr repository:%s host:%s\n",
+				fileDiff.Entry.Source,
+				fileDiff.Entry.Target,
+			)
+
+			if fileDiff.Binary {
+				fmt.Fprintf(
+					output,
+					"Binary files repository:%s and host:%s differ\n",
+					fileDiff.Entry.Source,
+					fileDiff.Entry.Target,
+				)
+				continue
+			}
+
+			fmt.Fprint(output, fileDiff.Patch)
+
+		case tracking.LocalNotApplied:
+			fmt.Fprintf(
+				output,
+				"diff --dotmgr repository:%s host:%s\n",
+				fileDiff.Entry.Source,
+				fileDiff.Entry.Target,
+			)
+			fmt.Fprintf(
+				output,
+				"not applied: %s\n",
+				fileDiff.Entry.Target,
+			)
+
+			if fileDiff.Binary {
+				fmt.Fprintf(
+					output,
+					"Binary repository file %s is not applied\n",
+					fileDiff.Entry.Source,
+				)
+				continue
+			}
+
+			fmt.Fprint(output, fileDiff.Patch)
+
+		case tracking.LocalSourceMissing:
+			fmt.Fprintf(
+				output,
+				"cannot diff %s: repository source missing: %s\n",
+				fileDiff.Entry.Target,
+				fileDiff.Entry.Source,
+			)
+
+		case tracking.LocalUnsupported:
+			fmt.Fprintf(
+				output,
+				"cannot diff %s: unsupported file type\n",
+				fileDiff.Entry.Target,
+			)
+		}
+	}
+}
+
 func printUsage(output io.Writer) {
 	fmt.Fprintln(output, `dotmgr manages configuration files using an embedded Git repository.
 
@@ -237,8 +343,9 @@ Usage:
 
 Commands:
   init        Initialize the local repository
-  add <file>  Copy a file into the repository and stage it
-  status      Show the repository status
+  add <file>  Copy a host file into the repository and stage it
+  status      Compare managed host files and show repository status
+  diff        Show differences between repository and host files
   repo-path   Show the local repository path
   platform    Show the operating system and architecture
   version     Show version information
