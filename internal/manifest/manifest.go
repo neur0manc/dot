@@ -1,29 +1,30 @@
 package manifest
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 
+	"github.com/pelletier/go-toml/v2"
+
 	"git.sr.ht/~stephan/dotmgr/internal/atomicfile"
 )
 
 const (
-	FileName       = "manifest.json"
+	FileName       = "manifest.toml"
 	CurrentVersion = 1
 )
 
 type File struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
+	Source string `toml:"source"`
+	Target string `toml:"target"`
 }
 
 type Manifest struct {
-	Version int    `json:"version"`
-	Files   []File `json:"files"`
+	Version int    `toml:"version"`
+	Files   []File `toml:"files"`
 }
 
 // Load reads a manifest. A missing file is treated as an empty manifest.
@@ -40,7 +41,7 @@ func Load(filename string) (*Manifest, error) {
 	}
 
 	var result Manifest
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := toml.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("decode manifest %q: %w", filename, err)
 	}
 
@@ -59,7 +60,7 @@ func Load(filename string) (*Manifest, error) {
 	return &result, nil
 }
 
-// Upsert adds entry or replaces the entry with the same target.
+// Upsert adds entry or replaces an existing entry with the same target.
 func (m *Manifest) Upsert(entry File) {
 	for index := range m.Files {
 		if m.Files[index].Target == entry.Target {
@@ -85,12 +86,16 @@ func (m *Manifest) Save(filename string) error {
 		m.Version = CurrentVersion
 	}
 
-	data, err := json.MarshalIndent(m, "", "  ")
+	m.sort()
+
+	data, err := toml.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("encode manifest: %w", err)
 	}
 
-	data = append(data, '\n')
+	if len(data) == 0 || data[len(data)-1] != '\n' {
+		data = append(data, '\n')
+	}
 
 	if err := atomicfile.WriteFile(filename, data, 0o644); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
