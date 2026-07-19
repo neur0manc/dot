@@ -3,10 +3,12 @@ package app
 import (
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 
 	"git.sr.ht/~stephan/dotmgr/internal/gitstore"
 	"git.sr.ht/~stephan/dotmgr/internal/paths"
+	"git.sr.ht/~stephan/dotmgr/internal/tracking"
 )
 
 type BuildInfo struct {
@@ -71,6 +73,43 @@ func Run(
 		fmt.Fprintf(stdout, "Initialized repository at %s\n", repositoryPath)
 		return 0
 
+	case "add":
+		if len(args) != 2 {
+			fmt.Fprintln(stderr, "usage: dotmgr add <file>")
+			return 2
+		}
+
+		repositoryPath, err := paths.Repository()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		homeDirectory, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: determine home directory: %v\n", err)
+			return 1
+		}
+
+		entry, err := tracking.Add(
+			repositoryPath,
+			homeDirectory,
+			args[1],
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		fmt.Fprintf(
+			stdout,
+			"Added %s\n  source: %s\n  target: %s\n",
+			args[1],
+			entry.Source,
+			entry.Target,
+		)
+		return 0
+
 	case "status":
 		repositoryPath, err := paths.Repository()
 		if err != nil {
@@ -106,10 +145,11 @@ Usage:
   dotmgr <command>
 
 Commands:
-  init       Initialize the local repository
-  status     Show the repository status
-  repo-path  Show the local repository path
-  platform   Show the operating system and architecture
-  version    Show version information
-  help       Show this help`)
+  init        Initialize the local repository
+  add <file>  Copy a file into the repository and stage it
+  status      Show the repository status
+  repo-path   Show the local repository path
+  platform    Show the operating system and architecture
+  version     Show version information
+  help        Show this help`)
 }
