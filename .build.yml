@@ -1,0 +1,216 @@
+image: alpine/latest
+
+packages:
+  - git
+  - go
+  - tar
+  - zip
+
+sources:
+  - https://git.sr.ht/~stephan/dotmgr
+
+artifacts:
+  - dotmgr/dist/dotmgr-linux-amd64.tar.gz
+  - dotmgr/dist/dotmgr-linux-arm64.tar.gz
+  - dotmgr/dist/dotmgr-darwin-amd64.tar.gz
+  - dotmgr/dist/dotmgr-darwin-arm64.tar.gz
+  - dotmgr/dist/dotmgr-windows-amd64.zip
+  - dotmgr/dist/dotmgr-windows-arm64.zip
+  - dotmgr/dist/SHA256SUMS
+  - dotmgr/dist/release-info.txt
+
+tasks:
+  - verify: |
+      set -eu
+
+      cd dotmgr
+
+      echo "Go toolchain:"
+      go version
+
+      echo "Checking formatting..."
+      unformatted="$(gofmt -l .)"
+
+      if [ -n "$unformatted" ]; then
+          echo "The following files are not formatted:"
+          printf '%s\n' "$unformatted"
+          exit 1
+      fi
+
+      echo "Downloading modules..."
+      go mod download
+
+      echo "Running tests..."
+      go test ./...
+
+      echo "Running go vet..."
+      go vet ./...
+
+  - build: |
+      set -eu
+
+      cd dotmgr
+
+      commit="$(git rev-parse HEAD)"
+      short_commit="$(git rev-parse --short=12 HEAD)"
+      build_date="$(git show -s --format=%cI HEAD)"
+
+      if tag="$(git describe --tags --exact-match HEAD 2>/dev/null)"; then
+          case "$tag" in
+              v[0-9]*.[0-9]*.[0-9]*)
+                  version="$tag"
+                  ;;
+              *)
+                  echo "HEAD has an unsupported release tag: $tag"
+                  echo "Expected a tag resembling v0.1.0"
+                  exit 1
+                  ;;
+          esac
+      else
+          version="dev-$short_commit"
+      fi
+
+      echo "Version: $version"
+      echo "Commit:  $commit"
+      echo "Date:    $build_date"
+
+      mkdir -p \
+          build/linux-amd64 \
+          build/linux-arm64 \
+          build/darwin-amd64 \
+          build/darwin-arm64 \
+          build/windows-amd64 \
+          build/windows-arm64 \
+          dist
+
+      ldflags="-s -w"
+      ldflags="$ldflags -X main.version=$version"
+      ldflags="$ldflags -X main.commit=$commit"
+      ldflags="$ldflags -X main.date=$build_date"
+
+      echo "Building Linux amd64..."
+      CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build \
+          -trimpath \
+          -buildvcs=false \
+          -ldflags "$ldflags" \
+          -o build/linux-amd64/dotmgr \
+          ./cmd/dotmgr
+
+      echo "Building Linux arm64..."
+      CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+          go build \
+          -trimpath \
+          -buildvcs=false \
+          -ldflags "$ldflags" \
+          -o build/linux-arm64/dotmgr \
+          ./cmd/dotmgr
+
+      echo "Building macOS amd64..."
+      CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 \
+          go build \
+          -trimpath \
+          -buildvcs=false \
+          -ldflags "$ldflags" \
+          -o build/darwin-amd64/dotmgr \
+          ./cmd/dotmgr
+
+      echo "Building macOS arm64..."
+      CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \
+          go build \
+          -trimpath \
+          -buildvcs=false \
+          -ldflags "$ldflags" \
+          -o build/darwin-arm64/dotmgr \
+          ./cmd/dotmgr
+
+      echo "Building Windows amd64..."
+      CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+          go build \
+          -trimpath \
+          -buildvcs=false \
+          -ldflags "$ldflags" \
+          -o build/windows-amd64/dotmgr.exe \
+          ./cmd/dotmgr
+
+      echo "Building Windows arm64..."
+      CGO_ENABLED=0 GOOS=windows GOARCH=arm64 \
+          go build \
+          -trimpath \
+          -buildvcs=false \
+          -ldflags "$ldflags" \
+          -o build/windows-arm64/dotmgr.exe \
+          ./cmd/dotmgr
+
+      echo "Verifying the native Linux build..."
+      ./build/linux-amd64/dotmgr version
+
+      actual_version="$(
+          ./build/linux-amd64/dotmgr version |
+              sed -n '1s/^dotmgr //p'
+      )"
+
+      if [ "$actual_version" != "$version" ]; then
+          echo "Version injection failed."
+          echo "Expected: $version"
+          echo "Actual:   $actual_version"
+          exit 1
+      fi
+
+      cat > dist/release-info.txt <<EOF
+      project: dotmgr
+      version: $version
+      commit: $commit
+      date: $build_date
+      source: https://git.sr.ht/~stephan/dotmgr
+      EOF
+
+      tar \
+          -C build/linux-amd64 \
+          -czf dist/dotmgr-linux-amd64.tar.gz \
+          dotmgr
+
+      tar \
+          -C build/linux-arm64 \
+          -czf dist/dotmgr-linux-arm64.tar.gz \
+          dotmgr
+
+      tar \
+          -C build/darwin-amd64 \
+          -czf dist/dotmgr-darwin-amd64.tar.gz \
+          dotmgr
+
+      tar \
+          -C build/darwin-arm64 \
+          -czf dist/dotmgr-darwin-arm64.tar.gz \
+          dotmgr
+
+      (
+          cd build/windows-amd64
+          zip -9 ../../dist/dotmgr-windows-amd64.zip dotmgr.exe
+      )
+
+      (
+          cd build/windows-arm64
+          zip -9 ../../dist/dotmgr-windows-arm64.zip dotmgr.exe
+      )
+
+      (
+          cd dist
+          sha256sum \
+              dotmgr-linux-amd64.tar.gz \
+              dotmgr-linux-arm64.tar.gz \
+              dotmgr-darwin-amd64.tar.gz \
+              dotmgr-darwin-arm64.tar.gz \
+              dotmgr-windows-amd64.zip \
+              dotmgr-windows-arm64.zip \
+              > SHA256SUMS
+      )
+
+      echo
+      echo "Release packages:"
+      ls -lh dist
+
+      echo
+      echo "Checksums:"
+      cat dist/SHA256SUMS
