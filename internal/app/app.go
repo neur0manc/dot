@@ -355,6 +355,78 @@ func Run(
 
 		return 0
 
+	case "apply":
+		if len(args) > 2 ||
+			(len(args) == 2 &&
+				args[1] != "--force" &&
+				args[1] != "-f") {
+			fmt.Fprintln(
+				stderr,
+				"usage: dotmgr apply [--force]",
+			)
+			return 2
+		}
+
+		force := len(args) == 2
+
+		repositoryPath, err := paths.Repository()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		homeDirectory, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(
+				stderr,
+				"error: determine home directory: %v\n",
+				err,
+			)
+			return 1
+		}
+
+		result, err := tracking.Apply(
+			repositoryPath,
+			homeDirectory,
+			force,
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		for _, entry := range result.Applied {
+			fmt.Fprintf(
+				stdout,
+				"Applied %s\n",
+				entry.Target,
+			)
+		}
+
+		for _, entry := range result.Overwritten {
+			fmt.Fprintf(
+				stdout,
+				"Overwritten %s\n",
+				entry.Target,
+			)
+		}
+
+		for _, entry := range result.Skipped {
+			fmt.Fprintf(
+				stdout,
+				"Unchanged %s\n",
+				entry.Target,
+			)
+		}
+
+		if len(result.Applied) == 0 &&
+			len(result.Overwritten) == 0 &&
+			len(result.Skipped) == 0 {
+			fmt.Fprintln(stdout, "No managed files.")
+		}
+
+		return 0
+
 	case "remote":
 		if len(args) < 2 {
 			fmt.Fprintln(
@@ -611,6 +683,8 @@ Commands:
               Push the current branch; defaults to origin
   clone <url>
               Clone into the internal repository without applying files
+  apply [--force]
+              Apply repository files; overwrite conflicts only with --force
   repo-path   Show the local repository path
   platform    Show the operating system and architecture
   version     Show version information
