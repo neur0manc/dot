@@ -317,6 +317,44 @@ func Run(
 
 		return 0
 
+	case "clone":
+		if len(args) != 2 {
+			fmt.Fprintln(
+				stderr,
+				"usage: dotmgr clone <url>",
+			)
+			return 2
+		}
+
+		repositoryPath, err := paths.Repository()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		if err := gitstore.Clone(
+			repositoryPath,
+			args[1],
+			stderr,
+		); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		fmt.Fprintf(
+			stdout,
+			"Cloned %s into %s.\n",
+			args[1],
+			repositoryPath,
+		)
+
+		fmt.Fprintln(
+			stdout,
+			"Managed files were not applied; run dotmgr status to inspect them.",
+		)
+
+		return 0
+
 	case "remote":
 		if len(args) < 2 {
 			fmt.Fprintln(
@@ -571,6 +609,8 @@ Commands:
               List configured Git remotes
   push [remote]
               Push the current branch; defaults to origin
+  clone <url>
+              Clone into the internal repository without applying files
   repo-path   Show the local repository path
   platform    Show the operating system and architecture
   version     Show version information
