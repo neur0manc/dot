@@ -317,6 +317,54 @@ func Run(
 
 		return 0
 
+	case "pull":
+		if len(args) > 2 {
+			fmt.Fprintln(
+				stderr,
+				"usage: dotmgr pull [remote]",
+			)
+			return 2
+		}
+
+		remoteName := "origin"
+		if len(args) == 2 {
+			remoteName = args[1]
+		}
+
+		repositoryPath, err := paths.Repository()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		updated, err := gitstore.Pull(
+			repositoryPath,
+			remoteName,
+			stderr,
+		)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		if !updated {
+			fmt.Fprintln(stdout, "Already up-to-date.")
+			return 0
+		}
+
+		fmt.Fprintf(
+			stdout,
+			"Fast-forwarded current branch from %s.\n",
+			remoteName,
+		)
+
+		fmt.Fprintln(
+			stdout,
+			"Managed host files were not applied; run dotmgr status to inspect them.",
+		)
+
+		return 0
+
 	case "clone":
 		if len(args) != 2 {
 			fmt.Fprintln(
@@ -681,6 +729,8 @@ Commands:
               List configured Git remotes
   push [remote]
               Push the current branch; defaults to origin
+  pull [remote]
+              Fast-forward from a remote without applying files
   clone <url>
               Clone into the internal repository without applying files
   apply [--force]
