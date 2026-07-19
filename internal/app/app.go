@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -182,6 +183,97 @@ func Run(
 		printRepositoryStatus(stdout, repositoryStatus.String())
 
 		return 0
+
+	case "commit":
+		if len(args) != 3 ||
+			(args[1] != "-m" && args[1] != "--message") {
+			fmt.Fprintln(
+				stderr,
+				"usage: dotmgr commit -m <message>",
+			)
+			return 2
+		}
+
+		message := strings.TrimSpace(args[2])
+		if message == "" {
+			fmt.Fprintln(
+				stderr,
+				"error: commit message must not be empty",
+			)
+			return 2
+		}
+
+		repositoryPath, err := paths.Repository()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		hash, err := gitstore.Commit(repositoryPath, message)
+		if errors.Is(err, gitstore.ErrNoStagedChanges) {
+			fmt.Fprintln(stdout, "Nothing to commit.")
+			return 0
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		hashText := hash.String()
+
+		fmt.Fprintf(
+			stdout,
+			"Committed %s: %s\n",
+			hashText[:12],
+			message,
+		)
+
+		return 0
+
+	case "config":
+		if len(args) != 2 && len(args) != 3 {
+			fmt.Fprintln(
+				stderr,
+				"usage: dotmgr config <user.name|user.email> [value]",
+			)
+			return 2
+		}
+
+		repositoryPath, err := paths.Repository()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		key := args[1]
+
+		if len(args) == 2 {
+			value, err := gitstore.UserConfig(repositoryPath, key)
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 1
+			}
+
+			if value == "" {
+				fmt.Fprintf(stderr, "error: %s is not configured\n", key)
+				return 1
+			}
+
+			fmt.Fprintln(stdout, value)
+			return 0
+		}
+
+		if err := gitstore.SetUserConfig(
+			repositoryPath,
+			key,
+			args[2],
+		); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		return 0
+
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
 		printUsage(stderr)
@@ -346,6 +438,10 @@ Commands:
   add <file>  Copy a host file into the repository and stage it
   status      Compare managed host files and show repository status
   diff        Show differences between repository and host files
+  config <key> [value]
+              Read or set repository-local configuration
+  commit -m <message>
+              Commit staged repository changes
   repo-path   Show the local repository path
   platform    Show the operating system and architecture
   version     Show version information
