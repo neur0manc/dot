@@ -274,6 +274,86 @@ func Run(
 
 		return 0
 
+	case "remote":
+		if len(args) < 2 {
+			fmt.Fprintln(
+				stderr,
+				"usage: dotmgr remote <add|list>",
+			)
+			return 2
+		}
+
+		repositoryPath, err := paths.Repository()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+
+		switch args[1] {
+		case "add":
+			if len(args) != 4 {
+				fmt.Fprintln(
+					stderr,
+					"usage: dotmgr remote add <name> <url>",
+				)
+				return 2
+			}
+
+			if err := gitstore.AddRemote(
+				repositoryPath,
+				args[2],
+				args[3],
+			); err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 1
+			}
+
+			fmt.Fprintf(
+				stdout,
+				"Added remote %s: %s\n",
+				args[2],
+				args[3],
+			)
+
+			return 0
+
+		case "list":
+			if len(args) != 2 {
+				fmt.Fprintln(
+					stderr,
+					"usage: dotmgr remote list",
+				)
+				return 2
+			}
+
+			remotes, err := gitstore.ListRemotes(repositoryPath)
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 1
+			}
+
+			for _, remote := range remotes {
+				for _, url := range remote.URLs {
+					fmt.Fprintf(
+						stdout,
+						"%s\t%s\n",
+						remote.Name,
+						url,
+					)
+				}
+			}
+
+			return 0
+
+		default:
+			fmt.Fprintf(
+				stderr,
+				"error: unknown remote operation %q\n",
+				args[1],
+			)
+			return 2
+		}
+
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
 		printUsage(stderr)
@@ -443,6 +523,10 @@ Commands:
   commit -m <message>
               Commit staged repository changes
   repo-path   Show the local repository path
+  remote add <name> <url>
+              Add a Git remote
+  remote list
+              List configured Git remotes
   platform    Show the operating system and architecture
   version     Show version information
   help        Show this help`)
