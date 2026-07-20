@@ -70,16 +70,11 @@ func sshAuthentication(
 		)
 	}
 
-	knownHostsPath := strings.TrimSpace(
-		os.Getenv("DOTMGR_SSH_KNOWN_HOSTS"),
+	knownHostsPath := filepath.Join(
+		homeDirectory,
+		".ssh",
+		"known_hosts",
 	)
-	if knownHostsPath == "" {
-		knownHostsPath = filepath.Join(
-			homeDirectory,
-			".ssh",
-			"known_hosts",
-		)
-	}
 
 	hostKeyCallback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
@@ -90,110 +85,19 @@ func sshAuthentication(
 		)
 	}
 
-	keyPath, err := findSSHKey(homeDirectory)
-	if err != nil {
-		return nil, err
-	}
-
-	passphrase := os.Getenv("DOTMGR_SSH_KEY_PASSPHRASE")
-
-	publicKeys, err := gitssh.NewPublicKeysFromFile(
-		username,
-		keyPath,
-		passphrase,
-	)
+	agentAuthentication, err := gitssh.NewSSHAgentAuth(username)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"load SSH private key %q: %w",
-			keyPath,
+			"connect to SSH agent: %w",
 			err,
 		)
 	}
 
-	publicKeys.HostKeyCallback = hostKeyCallback
+	agentAuthentication.HostKeyCallback = hostKeyCallback
 
-	return &publicKeysWithHostKeyAlgorithms{
-		PublicKeys: publicKeys,
+	return &agentAuthenticationWithHostKeyAlgorithms{
+		PublicKeysCallback: agentAuthentication,
 	}, nil
-}
-
-func findSSHKey(homeDirectory string) (string, error) {
-	configuredKey := strings.TrimSpace(
-		os.Getenv("DOTMGR_SSH_KEY"),
-	)
-
-	if configuredKey != "" {
-		keyPath, err := expandHomePath(
-			homeDirectory,
-			configuredKey,
-		)
-		if err != nil {
-			return "", err
-		}
-
-		if _, err := os.Stat(keyPath); err != nil {
-			return "", fmt.Errorf(
-				"inspect SSH private key %q: %w",
-				keyPath,
-				err,
-			)
-		}
-
-		return keyPath, nil
-	}
-
-	candidates := []string{
-		filepath.Join(homeDirectory, ".ssh", "id_ed25519"),
-		filepath.Join(homeDirectory, ".ssh", "id_rsa"),
-	}
-
-	for _, candidate := range candidates {
-		info, err := os.Stat(candidate)
-		if err == nil && info.Mode().IsRegular() {
-			return candidate, nil
-		}
-
-		if err != nil && !os.IsNotExist(err) {
-			return "", fmt.Errorf(
-				"inspect SSH private key %q: %w",
-				candidate,
-				err,
-			)
-		}
-	}
-
-	return "", fmt.Errorf(
-		"no SSH private key found; set DOTMGR_SSH_KEY or create " +
-			"~/.ssh/id_ed25519",
-	)
-}
-
-func expandHomePath(
-	homeDirectory string,
-	path string,
-) (string, error) {
-	if path == "~" {
-		return homeDirectory, nil
-	}
-
-	if strings.HasPrefix(path, "~/") ||
-		strings.HasPrefix(path, `~\`) {
-		return filepath.Join(
-			homeDirectory,
-			filepath.FromSlash(
-				strings.ReplaceAll(path[2:], `\`, `/`),
-			),
-		), nil
-	}
-
-	if strings.HasPrefix(path, "~") {
-		return "", fmt.Errorf(
-			"unsupported home-relative path %q",
-			path,
-		)
-	}
-
-	return filepath.Clean(path), nil
 }
 
 func httpsAuthentication() (transport.AuthMethod, error) {
@@ -225,21 +129,22 @@ func httpsAuthentication() (transport.AuthMethod, error) {
 	}, nil
 }
 
-// publicKeysWithHostKeyAlgorithms adjusts host-key negotiation while retaining
-// go-git's public-key authentication and strict known_hosts verification.
+// agentAuthenticationWithHostKeyAlgorithms adjusts host-key negotiation while
+// retaining SSH-agent authentication and strict known_hosts verification.
 //
 // OpenSSH prefers Ed25519 host keys. Go's default preference can differ, which
 // may produce a known_hosts key mismatch when only the server's Ed25519 key is
 // recorded.
-type publicKeysWithHostKeyAlgorithms struct {
-	*gitssh.PublicKeys
+type agentAuthenticationWithHostKeyAlgorithms struct {
+	*gitssh.PublicKeysCallback
 }
 
-func (authentication *publicKeysWithHostKeyAlgorithms) ClientConfig() (
+func (authentication *agentAuthenticationWithHostKeyAlgorithms) ClientConfig() (
 	*xssh.ClientConfig,
 	error,
 ) {
-	configuration, err := authentication.PublicKeys.ClientConfig()
+	configuration, err :=
+		authentication.PublicKeysCallback.ClientConfig()
 	if err != nil {
 		return nil, err
 	}

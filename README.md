@@ -29,7 +29,7 @@ is a thing.
 
 ### q: but go?
 
-go really is great
+go really is great indeed
 
 - native git library available
 - cross-compiling on alpine linux for all platforms
@@ -38,7 +38,7 @@ go really is great
 - 50 mb binary size for a simple hello world seem to be solved as well
   (although that was never that big of a deal but it's nice)
 
-but most important. it has a good, cute mascot
+but most important: it has a good, cute mascot
 
 ### disclaimer
 
