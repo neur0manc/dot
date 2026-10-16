@@ -1,4 +1,4 @@
-package gitstore
+package store
 
 import (
 	"fmt"

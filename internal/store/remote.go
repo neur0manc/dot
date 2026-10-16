@@ -1,25 +1,21 @@
-package gitstore
+package store
 
 import (
 	"fmt"
 	"sort"
 	"strings"
 
-	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 )
 
+// Remote is a configured Git remote.
 type Remote struct {
 	Name string
 	URLs []string
 }
 
-// AddRemote adds a named remote to the repository.
-func AddRemote(
-	repositoryPath string,
-	name string,
-	url string,
-) error {
+// AddRemote adds a named remote.
+func (s *Store) AddRemote(name string, url string) error {
 	name = strings.TrimSpace(name)
 	url = strings.TrimSpace(url)
 
@@ -31,42 +27,20 @@ func AddRemote(
 		return fmt.Errorf("remote URL must not be empty")
 	}
 
-	repository, err := git.PlainOpen(repositoryPath)
-	if err != nil {
-		return fmt.Errorf(
-			"open repository at %q: %w",
-			repositoryPath,
-			err,
-		)
-	}
-
-	_, err = repository.CreateRemote(&config.RemoteConfig{
+	_, err := s.repo.CreateRemote(&config.RemoteConfig{
 		Name: name,
 		URLs: []string{url},
 	})
 	if err != nil {
-		return fmt.Errorf(
-			"add remote %q: %w",
-			name,
-			err,
-		)
+		return fmt.Errorf("add remote %q: %w", name, err)
 	}
 
 	return nil
 }
 
-// ListRemotes returns all configured remotes sorted by name.
-func ListRemotes(repositoryPath string) ([]Remote, error) {
-	repository, err := git.PlainOpen(repositoryPath)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"open repository at %q: %w",
-			repositoryPath,
-			err,
-		)
-	}
-
-	gitRemotes, err := repository.Remotes()
+// Remotes returns all configured remotes sorted by name.
+func (s *Store) Remotes() ([]Remote, error) {
+	gitRemotes, err := s.repo.Remotes()
 	if err != nil {
 		return nil, fmt.Errorf("list remotes: %w", err)
 	}

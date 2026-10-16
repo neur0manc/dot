@@ -4,10 +4,19 @@ packages:
   - git
   - go
   - tar
+  - curl
   - zip
 
 sources:
   - https://git.sr.ht/~stephan/dotmgr
+
+# Releases are also uploaded to the tag on git.sr.ht, because build artifacts
+# are deleted after 90 days. Create a personal access token with the
+# git.sr.ht objects:rw scope at https://meta.sr.ht/oauth2, store it as a
+# "file" secret at https://builds.sr.ht/secrets with the path
+# ~/.git.sr.ht-token, and list the secret's UUID here:
+# secrets:
+#   - 00000000-0000-0000-0000-000000000000
 
 artifacts:
   - dotmgr/dist/dotmgr-linux-amd64.tar.gz
@@ -214,3 +223,24 @@ tasks:
       echo
       echo "Checksums:"
       cat dist/SHA256SUMS
+
+  - publish: |
+      set -eu
+
+      cd dotmgr
+
+      # Only tagged commits are published.
+      tag="$(git describe --tags --exact-match HEAD 2>/dev/null)" || complete-build
+
+      if [ ! -f "$HOME/.git.sr.ht-token" ]; then
+          echo "No git.sr.ht token configured; skipping upload."
+          exit 0
+      fi
+
+      for file in dist/*; do
+          echo "Uploading $file to $tag"
+          curl -fsS \
+              -H "Authorization: Bearer $(cat "$HOME/.git.sr.ht-token")" \
+              -F "file=@$file" \
+              "https://git.sr.ht/api/repos/dotmgr/artifacts/$tag"
+      done
