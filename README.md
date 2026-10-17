@@ -53,6 +53,44 @@ on another machine `dotmgr clone <url>` checks the files out into `$HOME`.
 files that already exist with different content are never overwritten
 unless you pass `--force` (also for `pull` and `checkout`).
 
+### per-os and per-host files
+
+like yadm, a tracked file can have alternates for different systems: name
+them `<file>##<condition>[,<condition>...]`, for example
+
+    ~/.gitconfig##default
+    ~/.gitconfig##os.Darwin
+    ~/.gitconfig##hostname.work,os.Linux
+    ~/.gitconfig##class.laptop
+
+to turn an existing file into an alternate, let dotmgr do the renaming:
+
+    dotmgr add --alt hostname.work,os.Linux ~/.gitconfig
+
+this renames `~/.gitconfig` to `~/.gitconfig##hostname.work,os.Linux`, tracks
+it and links the old name back to it. if the alternate does not apply to
+the machine you are on (say `--alt os.Windows` on a mac), the file is copied
+instead, so nothing you use disappears. permissions are kept. think twice
+before tracking secrets such as private ssh keys: `dotmgr push` sends
+them to the remote.
+
+`dotmgr alt` makes `~/.gitconfig` a symbolic link to the best match (a copy
+on windows) and it runs automatically after `clone`, `pull` and `checkout`.
+conditions: `default`, `os.` (linux, darwin or macos, windows), `arch.`,
+`class.` (set with `dotmgr config local.class laptop`), `hostname.` (without
+domain) and `user.`. matching ignores case; all conditions of an alternate
+must match, and the one with the heaviest conditions wins (user > hostname >
+os > class > arch > default). add the `##` files, not the generated one;
+dotmgr never replaces a file it did not create unless you pass `--force`.
+templates (`##template`) are not supported.
+
+ssh remotes authenticate like `ssh` does: keys of the running ssh-agent
+first, then `IdentityFile` entries from `~/.ssh/config` and the default
+key files in `~/.ssh`. encrypted key files ask for their passphrase on the
+terminal (or read `DOTMGR_SSH_PASSPHRASE`); host keys are checked against
+`~/.ssh/known_hosts`. https remotes use `DOTMGR_HTTPS_USERNAME` and
+`DOTMGR_HTTPS_PASSWORD`.
+
 `dotmgr help` lists all commands. `DOTMGR_HOME` and `DOTMGR_REPO` override
 the working tree and git directory locations.
 

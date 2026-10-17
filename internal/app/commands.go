@@ -80,7 +80,72 @@ func runClone(c *context, args []string) error {
 	fmt.Fprintf(c.stdout, "Cloned %s into %s.\n", args[0], gitDir)
 	printResult(c, result)
 
+	return applyAlternates(c, s, false, false)
+}
+
+// applyAlternates runs Alt for the current machine and reports the outcome.
+// Conflicts are an error only when strict is set (the alt command); after
+// clone, pull and checkout they are warnings.
+func applyAlternates(
+	c *context,
+	s *store.Store,
+	force bool,
+	strict bool,
+) error {
+	facts, err := s.SystemFacts()
+	if err != nil {
+		return err
+	}
+
+	result, err := s.Alt(facts, force)
+	if err != nil {
+		return err
+	}
+
+	for _, change := range result.Created {
+		verb := "linked"
+		if change.Copy {
+			verb = "copied"
+		}
+
+		fmt.Fprintf(c.stdout, "  %s %s <- %s\n", verb, change.Name, change.Source)
+	}
+
+	for _, name := range result.Removed {
+		fmt.Fprintf(c.stdout, "  removed %s\n", name)
+	}
+
+	if len(result.Conflicts) == 0 {
+		return nil
+	}
+
+	message := fmt.Sprintf(
+		"not replaced, because dotmgr did not create them: %s\n"+
+			"Run `dotmgr alt --force` to replace them",
+		strings.Join(result.Conflicts, ", "),
+	)
+
+	if strict {
+		return errors.New(message)
+	}
+
+	fmt.Fprintf(c.stderr, "warning: %s\n", message)
+
 	return nil
+}
+
+func runAlt(c *context, args []string) error {
+	args, force := takeFlag(args, "--force", "-f")
+	if len(args) != 0 {
+		return usageError{"unexpected argument " + args[0]}
+	}
+
+	s, err := c.open()
+	if err != nil {
+		return err
+	}
+
+	return applyAlternates(c, s, force, true)
 }
 
 func printResult(c *context, result store.SyncResult) {
@@ -93,7 +158,38 @@ func printResult(c *context, result store.SyncResult) {
 	}
 }
 
+// takeOption removes "--name value" or "--name=value" from args.
+func takeOption(args []string, name string) ([]string, string, error) {
+	var rest []string
+	value := ""
+
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+
+		switch {
+		case arg == name:
+			if index+1 >= len(args) {
+				return nil, "", usageError{name + " needs a value"}
+			}
+
+			index++
+			value = args[index]
+		case strings.HasPrefix(arg, name+"="):
+			value = strings.TrimPrefix(arg, name+"=")
+		default:
+			rest = append(rest, arg)
+		}
+	}
+
+	return rest, value, nil
+}
+
 func runAdd(c *context, args []string) error {
+	args, conditions, err := takeOption(args, "--alt")
+	if err != nil {
+		return err
+	}
+
 	if len(args) == 0 {
 		return usageError{"add needs at least one path"}
 	}
@@ -101,6 +197,10 @@ func runAdd(c *context, args []string) error {
 	s, err := c.open()
 	if err != nil {
 		return err
+	}
+
+	if conditions != "" {
+		return runAddAlternate(c, s, conditions, args)
 	}
 
 	names, err := s.Add(args...)
@@ -113,6 +213,32 @@ func runAdd(c *context, args []string) error {
 	}
 
 	return nil
+}
+
+func runAddAlternate(
+	c *context,
+	s *store.Store,
+	conditions string,
+	args []string,
+) error {
+	result, err := s.AddAlternate(conditions, args...)
+	if err != nil {
+		return err
+	}
+
+	for _, name := range result.Added {
+		fmt.Fprintf(c.stdout, "Added %s\n", name)
+	}
+
+	for _, name := range result.Copied {
+		fmt.Fprintf(
+			c.stdout,
+			"Kept %s as it is: the alternate does not apply to this machine\n",
+			name,
+		)
+	}
+
+	return applyAlternates(c, s, false, true)
 }
 
 func runRemove(c *context, args []string) error {
@@ -266,7 +392,7 @@ func runCheckout(c *context, args []string) error {
 		fmt.Fprintln(c.stdout, "Nothing to restore.")
 	}
 
-	return nil
+	return applyAlternates(c, s, false, false)
 }
 
 // conflictHint explains how to resolve a ConflictError.
@@ -416,7 +542,7 @@ func runPull(c *context, args []string) error {
 
 	fmt.Fprintf(c.stdout, "Updated current branch from %s.\n", remote)
 
-	return nil
+	return applyAlternates(c, s, false, false)
 }
 
 func runRepoPath(c *context, args []string) error {

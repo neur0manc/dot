@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -155,5 +156,114 @@ func TestEndToEnd(t *testing.T) {
 
 	if got := must("status"); got != "D  .vimrc\n" {
 		t.Fatalf("status after rm = %q", got)
+	}
+}
+
+func TestAltCommand(t *testing.T) {
+	home := setup(t)
+
+	must := func(args ...string) string {
+		t.Helper()
+
+		code, stdout, stderr := run(t, args...)
+		if code != 0 {
+			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
+		}
+
+		return stdout
+	}
+
+	must("init")
+	must("config", "local.class", "work")
+
+	if got := strings.TrimSpace(must("config", "local.class")); got != "work" {
+		t.Fatalf("class = %q", got)
+	}
+
+	for name, content := range map[string]string{
+		".gitconfig##default":    "personal\n",
+		".gitconfig##class.work": "work\n",
+	} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	must("add", "~/.gitconfig##default", "~/.gitconfig##class.work")
+
+	if got := must("alt"); !strings.Contains(got, ".gitconfig <- .gitconfig##class.work") {
+		t.Fatalf("alt output = %q", got)
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".gitconfig"))
+	if err != nil || string(data) != "work\n" {
+		t.Fatalf(".gitconfig = %q %v", data, err)
+	}
+
+	// The generated file does not show up as a change.
+	if got := must("status"); !strings.HasPrefix(got, "A  .gitconfig##") {
+		t.Fatalf("status = %q", got)
+	}
+
+	// A foreign file is reported, not overwritten.
+	must("config", "local.class", "other")
+
+	if err := os.Remove(filepath.Join(home, ".gitconfig")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := run(t, "alt")
+	if code != 1 || !strings.Contains(stderr, "alt --force") {
+		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+}
+
+func TestAddAltFlag(t *testing.T) {
+	home := setup(t)
+
+	must := func(args ...string) string {
+		t.Helper()
+
+		code, stdout, stderr := run(t, args...)
+		if code != 0 {
+			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
+		}
+
+		return stdout
+	}
+
+	must("init")
+
+	if err := os.WriteFile(filepath.Join(home, ".rc"), []byte("rc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hostname, _ := os.Hostname()
+	hostname, _, _ = strings.Cut(hostname, ".")
+
+	for _, form := range [][]string{
+		{"add", "--alt", "hostname." + hostname, "~/.rc"},
+	} {
+		got := must(form...)
+
+		if !strings.Contains(got, "Added .rc##hostname.") ||
+			(runtime.GOOS != "windows" && !strings.Contains(got, "linked .rc")) {
+			t.Fatalf("output = %q", got)
+		}
+	}
+
+	if data, err := os.ReadFile(filepath.Join(home, ".rc")); err != nil || string(data) != "rc\n" {
+		t.Fatalf(".rc = %q %v", data, err)
+	}
+
+	if code, _, stderr := run(t, "add", "--alt"); code != 2 {
+		t.Fatalf("missing value: code=%d stderr=%q", code, stderr)
+	}
+
+	if code, _, _ := run(t, "add", "--alt", "bogus", "~/.rc"); code != 1 {
+		t.Fatalf("bad condition should fail, code=%d", code)
 	}
 }

@@ -103,6 +103,8 @@ func (s *Store) SetUserConfig(key string, value string) error {
 		configuration.User.Name = value
 	case "user.email":
 		configuration.User.Email = value
+	case ClassConfigKey:
+		configuration.Raw.Section("dotmgr").SetOption("class", value)
 	default:
 		return fmt.Errorf("unsupported configuration key %q", key)
 	}
@@ -126,6 +128,8 @@ func (s *Store) UserConfig(key string) (string, error) {
 		return configuration.User.Name, nil
 	case "user.email":
 		return configuration.User.Email, nil
+	case ClassConfigKey:
+		return s.class()
 	default:
 		return "", fmt.Errorf("unsupported configuration key %q", key)
 	}
