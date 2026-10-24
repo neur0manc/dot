@@ -101,6 +101,13 @@ your home directory. edit it there and track it like any other file:
     dot add ~/.local/dot/README.md
     dot commit -m "describe my dotfiles"
 
+### private files
+
+files under `~/.ssh` and `~/.gnupg` are written readable only by you (0600,
+or 0700 if executable), and dot creates those directories as 0700. checkout,
+pull and clone also tighten such files that are readable by others, as dot
+0.4 left them. elsewhere, a file dot overwrites keeps the permissions it has.
+
 ### shell completion
 
 add one line to your shell's configuration, which then travels with your

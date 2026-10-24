@@ -174,6 +174,10 @@ func printResult(c *cli, result store.SyncResult) {
 	for _, name := range result.Removed {
 		fmt.Fprintf(c.stdout, "  removed %s\n", name)
 	}
+
+	for _, name := range result.Secured {
+		fmt.Fprintf(c.stdout, "  made    %s private\n", name)
+	}
 }
 
 func runAdd(c *cli, args []string) error {
@@ -428,7 +432,7 @@ func runCheckout(c *cli, args []string) error {
 
 	printResult(c, result)
 
-	if len(result.Written) == 0 && len(result.Removed) == 0 {
+	if len(result.Written) == 0 && len(result.Removed) == 0 && len(result.Secured) == 0 {
 		fmt.Fprintln(c.stdout, "Nothing to restore.")
 	}
 
