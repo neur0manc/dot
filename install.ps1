@@ -45,7 +45,9 @@ try {
     Expand-Archive -Path $binary -DestinationPath $tmp -Force
     Move-Item -Force (Join-Path $tmp 'dot.exe') (Join-Path $dir 'dot.exe')
 
-    Write-Host "Installed $(Join-Path $dir 'dot.exe')"
+    $exe = Join-Path $dir 'dot.exe'
+    $installed = & $exe --version | Select-Object -First 1
+    Write-Host "Installed $installed to $exe"
 
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if (($userPath -split ';') -notcontains $dir) {
