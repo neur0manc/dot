@@ -3,9 +3,11 @@ package store
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -34,6 +36,46 @@ func (e *ConflictError) Unwrap() error { return ErrConflicts }
 type SyncResult struct {
 	Written []string
 	Removed []string
+	Secured []string // private files whose permissions were tightened
+}
+
+// privateDirs hold files that only their owner may read, such as SSH keys.
+// dot writes files in them as 0600 (0700 if executable) and creates the
+// directories as 0700.
+var privateDirs = []string{".ssh", ".gnupg"}
+
+// isPrivate reports whether filePath, relative to the home directory, lies
+// in a private directory.
+func isPrivate(filePath string) bool {
+	top, _, _ := strings.Cut(filePath, "/")
+	return slices.Contains(privateDirs, top)
+}
+
+// mkdirParents creates the parent directories of filePath.
+func (s *Store) mkdirParents(filePath string) error {
+	permissions := os.FileMode(0o755)
+	if isPrivate(filePath) {
+		permissions = 0o700
+	}
+
+	return os.MkdirAll(filepath.Dir(s.absolutePath(filePath)), permissions)
+}
+
+// secure removes the group and other permissions from a private file that
+// has them, as a file written by dot 0.4 has.
+func (s *Store) secure(filePath string) (bool, error) {
+	filename := s.absolutePath(filePath)
+
+	info, err := os.Lstat(filename)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 == 0 {
+		return false, nil
+	}
+
+	if err := os.Chmod(filename, info.Mode().Perm()&^0o077); err != nil {
+		return false, fmt.Errorf("make %q private: %w", filePath, err)
+	}
+
+	return true, nil
 }
 
 // update makes the files on disk and the index follow target. current are
@@ -143,6 +185,23 @@ func (s *Store) update(
 		result.Written = append(result.Written, filePath)
 	}
 
+	if runtime.GOOS != "windows" {
+		for _, filePath := range slices.Sorted(maps.Keys(wanted)) {
+			if !isPrivate(filePath) {
+				continue
+			}
+
+			secured, err := s.secure(filePath)
+			if err != nil {
+				return result, err
+			}
+
+			if secured {
+				result.Secured = append(result.Secured, filePath)
+			}
+		}
+	}
+
 	for _, filePath := range deletes {
 		err := os.Remove(s.absolutePath(filePath))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -190,11 +249,11 @@ func (s *Store) writeFile(name string, entry treeEntry) error {
 
 	filename := s.absolutePath(name)
 
-	if entry.mode == filemode.Symlink {
-		if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
-			return fmt.Errorf("create directory for %q: %w", name, err)
-		}
+	if err := s.mkdirParents(name); err != nil {
+		return fmt.Errorf("create directory for %q: %w", name, err)
+	}
 
+	if entry.mode == filemode.Symlink {
 		if err := os.Remove(filename); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("replace %q: %w", name, err)
 		}
@@ -219,6 +278,10 @@ func (s *Store) writeFile(name string, entry treeEntry) error {
 			// Make the file executable for everyone who can read it.
 			permissions |= (permissions & 0o444) >> 2
 		}
+	}
+
+	if isPrivate(name) {
+		permissions &^= 0o077
 	}
 
 	if err := atomicfile.WriteFile(filename, data, permissions); err != nil {

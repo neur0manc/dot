@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -636,5 +637,61 @@ func TestSyncRejectsUnsafePaths(t *testing.T) {
 
 	if err := validateName(".config/git/config"); err != nil {
 		t.Errorf("validateName rejected a normal path: %v", err)
+	}
+}
+
+func TestPrivateFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no permission bits")
+	}
+
+	a := newMachine(t)
+	source := a.init(t)
+
+	a.write(t, ".ssh/id_ed25519", "key\n")
+	a.write(t, ".rc", "rc\n")
+	if _, err := source.Add("~/.ssh/id_ed25519", "~/.rc"); err != nil {
+		t.Fatal(err)
+	}
+	mustCommit(t, source, "key")
+
+	b := newMachine(t)
+	clone, _, err := Clone(b.gitDir, b.home, createRemote(t, source), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	perm := func(name string) os.FileMode {
+		t.Helper()
+
+		info, err := os.Stat(filepath.Join(b.home, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return info.Mode().Perm()
+	}
+
+	if got := perm(".ssh/id_ed25519"); got != 0o600 {
+		t.Errorf("key: %o", got)
+	}
+	if got := perm(".ssh"); got != 0o700 {
+		t.Errorf(".ssh: %o", got)
+	}
+	if got := perm(".rc"); got != 0o644 {
+		t.Errorf(".rc: %o", got)
+	}
+
+	// A key that dot 0.4 wrote readable for everyone is made private.
+	if err := os.Chmod(filepath.Join(b.home, ".ssh/id_ed25519"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := clone.Checkout(false)
+	if err != nil || strings.Join(result.Secured, ",") != ".ssh/id_ed25519" {
+		t.Fatalf("checkout: %+v %v", result, err)
+	}
+	if got := perm(".ssh/id_ed25519"); got != 0o600 {
+		t.Errorf("key after checkout: %o", got)
 	}
 }
