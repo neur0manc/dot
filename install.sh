@@ -74,7 +74,8 @@ tar -xzf "$tmp/$name" -C "$tmp" dot
 chmod 755 "$tmp/dot"
 mv "$tmp/dot" "$dir/dot"
 
-echo "Installed $dir/dot"
+installed=$("$dir/dot" --version | head -n 1)
+echo "Installed ${installed:-dot} to $dir/dot"
 
 case ":$PATH:" in
 *":$dir:"*) ;;
