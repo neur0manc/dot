@@ -55,34 +55,41 @@ unless you pass `--force` (also for `pull` and `checkout`).
 
 ### per-os and per-host files
 
-like yadm, a tracked file can have alternates for different systems: name
-them `<file>##<condition>[,<condition>...]`, for example
+a tracked file can have variants for different machines. say which machines
+a file is for when you add it:
 
-    ~/.gitconfig##default
-    ~/.gitconfig##os.Darwin
-    ~/.gitconfig##hostname.work,os.Linux
-    ~/.gitconfig##class.laptop
+    dotmgr add ~/.zshrc --os                # only on this os (darwin, ...)
+    dotmgr add ~/.zshrc --os=linux          # the version for linux machines
+    dotmgr add ~/.ssh/config --host         # only on this host
+    dotmgr add ~/.gitconfig --class=work    # machines of class "work"
 
-to turn an existing file into an alternate, let dotmgr do the renaming:
+only the variant that fits the machine best is put on disk, under the
+file's real name; the others stay in the repository. a plainly added file is
+the fallback for machines that no variant fits. `--os` and friends without a
+value mean this machine; values need `=`. several conditions must all match.
 
-    dotmgr add --alt hostname.work,os.Linux ~/.gitconfig
+- `--os[=…]`: linux, darwin (or macos), windows, freebsd, …; `unix` is
+  every system but windows
+- `--host[=…]`: the host name without domain
+- `--class[=…]`: set a machine's class with `dotmgr config local.class work`;
+  changing it switches files to the variants that fit now
+- `--arch[=…]`: amd64, arm64, …
 
-this renames `~/.gitconfig` to `~/.gitconfig##hostname.work,os.Linux`, tracks
-it and links the old name back to it. if the alternate does not apply to
-the machine you are on (say `--alt os.Windows` on a mac), the file is copied
-instead, so nothing you use disappears. permissions are kept. think twice
-before tracking secrets such as private ssh keys: `dotmgr push` sends
-them to the remote.
+when several variants fit, the most specific wins: host > os > unix >
+class > arch > plain file. adding a variant for this machine to a file that
+was tracked plainly limits the file to such machines; a variant for other
+machines (say `--os=linux` on a mac) is stored next to it and leaves the
+file on disk alone. once a file has variants, `dotmgr add ~/.zshrc` updates
+the one in use, and `dotmgr rm ~/.zshrc` untracks it (`dotmgr rm ~/.zshrc
+--os=linux` names another). `dotmgr list` shows all variants.
 
-`dotmgr alt` makes `~/.gitconfig` a symbolic link to the best match (a copy
-on windows) and it runs automatically after `clone`, `pull` and `checkout`.
-conditions: `default`, `os.` (linux, darwin or macos, windows), `arch.`,
-`class.` (set with `dotmgr config local.class laptop`), `hostname.` (without
-domain) and `user.`. matching ignores case; all conditions of an alternate
-must match, and the one with the heaviest conditions wins (user > hostname >
-os > class > arch > default). add the `##` files, not the generated one;
-dotmgr never replaces a file it did not create unless you pass `--force`.
-templates (`##template`) are not supported.
+in the repository a variant is stored as `<file>##<condition>,…`, the way
+yadm names them (`.zshrc##os.darwin`), so the repository stays readable
+with plain git. dotmgr 0.3 kept those `##` files on disk and linked to them;
+the first command you run after upgrading moves them back.
+
+think twice before tracking secrets such as private ssh keys: `dotmgr push`
+sends them to the remote.
 
 ssh remotes authenticate like `ssh` does: keys of the running ssh-agent
 first, then `IdentityFile` entries from `~/.ssh/config` and the default

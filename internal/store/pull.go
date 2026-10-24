@@ -39,12 +39,12 @@ func (s *Store) Pull(
 		return false, errors.New("remote name must not be empty")
 	}
 
-	states, err := s.Status()
+	staged, err := s.hasStagedChanges()
 	if err != nil {
 		return false, err
 	}
 
-	if hasStaged(states) {
+	if staged {
 		return false, ErrPullStagedChanges
 	}
 
@@ -136,7 +136,17 @@ func (s *Store) Pull(
 		)
 	}
 
-	if _, err := s.Sync(remoteHash, false, force); err != nil {
+	current, err := s.commitFiles(localHash)
+	if err != nil {
+		return false, err
+	}
+
+	target, err := s.commitFiles(remoteHash)
+	if err != nil {
+		return false, err
+	}
+
+	if _, err := s.update(current, target, false, force); err != nil {
 		return false, err
 	}
 
@@ -149,45 +159,33 @@ func (s *Store) Pull(
 }
 
 // isAncestor reports whether ancestor is reachable from descendant.
-func (s *Store) isAncestor(
-	ancestor plumbing.Hash,
-	descendant plumbing.Hash,
-) (bool, error) {
-	pending := []plumbing.Hash{descendant}
-	visited := map[plumbing.Hash]struct{}{}
-
-	for len(pending) > 0 {
-		current := pending[len(pending)-1]
-		pending = pending[:len(pending)-1]
-
-		if current == ancestor {
-			return true, nil
-		}
-
-		if _, seen := visited[current]; seen {
-			continue
-		}
-
-		visited[current] = struct{}{}
-
-		commit, err := s.repo.CommitObject(current)
-		if err != nil {
-			return false, fmt.Errorf("load commit %s: %w", current, err)
-		}
-
-		pending = append(pending, commit.ParentHashes...)
+func (s *Store) isAncestor(ancestor plumbing.Hash, descendant plumbing.Hash) (bool, error) {
+	ancestorCommit, err := s.repo.CommitObject(ancestor)
+	if err != nil {
+		return false, fmt.Errorf("load commit %s: %w", ancestor, err)
 	}
 
-	return false, nil
+	descendantCommit, err := s.repo.CommitObject(descendant)
+	if err != nil {
+		return false, fmt.Errorf("load commit %s: %w", descendant, err)
+	}
+
+	return ancestorCommit.IsAncestor(descendantCommit)
 }
 
 // Checkout writes all files of HEAD to the working tree, restoring deleted
-// files. Modified files are reported as a ConflictError unless force is set.
+// files and switching files to the variant that fits the machine now.
+// Modified files are reported as a ConflictError unless force is set.
 func (s *Store) Checkout(force bool) (SyncResult, error) {
 	head, err := s.repo.Head()
 	if err != nil {
 		return SyncResult{}, fmt.Errorf("resolve HEAD: %w", err)
 	}
 
-	return s.Sync(head.Hash(), true, force)
+	files, err := s.commitFiles(head.Hash())
+	if err != nil {
+		return SyncResult{}, err
+	}
+
+	return s.update(files, files, true, force)
 }

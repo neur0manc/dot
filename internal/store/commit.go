@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -46,12 +47,12 @@ func (s *Store) Commit(message string) (plumbing.Hash, error) {
 		)
 	}
 
-	states, err := s.Status()
+	staged, err := s.hasStagedChanges()
 	if err != nil {
 		return plumbing.ZeroHash, err
 	}
 
-	if !hasStaged(states) {
+	if !staged {
 		return plumbing.ZeroHash, ErrNoStagedChanges
 	}
 
@@ -77,60 +78,18 @@ func (s *Store) Commit(message string) (plumbing.Hash, error) {
 	return hash, nil
 }
 
-func hasStaged(states []FileState) bool {
-	for _, state := range states {
-		if state.Staged != Unmodified {
-			return true
-		}
-	}
-
-	return false
-}
-
-// SetUserConfig writes the repository-local commit identity.
-func (s *Store) SetUserConfig(key string, value string) error {
-	if value == "" {
-		return fmt.Errorf("%s must not be empty", key)
-	}
-
-	configuration, err := s.repo.Config()
+// hasStagedChanges reports whether the index differs from HEAD. Unlike
+// Status it does not read the working tree.
+func (s *Store) hasStagedChanges() (bool, error) {
+	idx, err := s.loadIndex()
 	if err != nil {
-		return fmt.Errorf("read repository configuration: %w", err)
+		return false, err
 	}
 
-	switch key {
-	case "user.name":
-		configuration.User.Name = value
-	case "user.email":
-		configuration.User.Email = value
-	case ClassConfigKey:
-		configuration.Raw.Section("dotmgr").SetOption("class", value)
-	default:
-		return fmt.Errorf("unsupported configuration key %q", key)
-	}
-
-	if err := s.repo.SetConfig(configuration); err != nil {
-		return fmt.Errorf("write repository configuration: %w", err)
-	}
-
-	return nil
-}
-
-// UserConfig reads the commit identity as Git would resolve it.
-func (s *Store) UserConfig(key string) (string, error) {
-	configuration, err := s.repo.ConfigScoped(config.GlobalScope)
+	head, err := s.headFiles()
 	if err != nil {
-		return "", fmt.Errorf("read repository configuration: %w", err)
+		return false, err
 	}
 
-	switch key {
-	case "user.name":
-		return configuration.User.Name, nil
-	case "user.email":
-		return configuration.User.Email, nil
-	case ClassConfigKey:
-		return s.class()
-	default:
-		return "", fmt.Errorf("unsupported configuration key %q", key)
-	}
+	return !maps.Equal(head, indexFiles(idx)), nil
 }

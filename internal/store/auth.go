@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,21 +10,17 @@ import (
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
-func authenticationForURL(
-	remoteURL string,
-) (transport.AuthMethod, error) {
+// authenticationForURL picks how to log in to a remote: like ssh for SSH
+// URLs, and with DOTMGR_HTTPS_USERNAME and DOTMGR_HTTPS_PASSWORD for HTTPS.
+func authenticationForURL(remoteURL string) (transport.AuthMethod, error) {
 	endpoint, err := transport.NewEndpoint(remoteURL)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"parse remote URL %q: %w",
-			remoteURL,
-			err,
-		)
+		return nil, fmt.Errorf("parse remote URL %q: %w", remoteURL, err)
 	}
 
 	switch strings.ToLower(endpoint.Protocol) {
 	case "ssh":
-		return sshAuthentication(endpoint.User, endpoint.Host)
+		return newSSHAuth(endpoint.User, endpoint.Host)
 
 	case "https":
 		return httpsAuthentication()
@@ -31,9 +28,7 @@ func authenticationForURL(
 	case "http":
 		if os.Getenv("DOTMGR_HTTPS_USERNAME") != "" ||
 			os.Getenv("DOTMGR_HTTPS_PASSWORD") != "" {
-			return nil, fmt.Errorf(
-				"refusing to send credentials over insecure HTTP",
-			)
+			return nil, errors.New("refusing to send credentials over insecure HTTP")
 		}
 
 		return nil, nil
@@ -42,18 +37,8 @@ func authenticationForURL(
 		return nil, nil
 
 	default:
-		return nil, fmt.Errorf(
-			"unsupported remote protocol %q",
-			endpoint.Protocol,
-		)
+		return nil, fmt.Errorf("unsupported remote protocol %q", endpoint.Protocol)
 	}
-}
-
-func sshAuthentication(
-	username string,
-	host string,
-) (transport.AuthMethod, error) {
-	return newSSHAuth(username, host)
 }
 
 func httpsAuthentication() (transport.AuthMethod, error) {
@@ -66,21 +51,12 @@ func httpsAuthentication() (transport.AuthMethod, error) {
 	}
 
 	if username == "" {
-		return nil, fmt.Errorf(
-			"DOTMGR_HTTPS_USERNAME is required when HTTPS " +
-				"authentication is configured",
-		)
+		return nil, errors.New("DOTMGR_HTTPS_USERNAME is required when DOTMGR_HTTPS_PASSWORD is set")
 	}
 
 	if password == "" {
-		return nil, fmt.Errorf(
-			"DOTMGR_HTTPS_PASSWORD is required when HTTPS " +
-				"authentication is configured",
-		)
+		return nil, errors.New("DOTMGR_HTTPS_PASSWORD is required when DOTMGR_HTTPS_USERNAME is set")
 	}
 
-	return &githttp.BasicAuth{
-		Username: username,
-		Password: password,
-	}, nil
+	return &githttp.BasicAuth{Username: username, Password: password}, nil
 }

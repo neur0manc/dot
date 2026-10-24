@@ -6,78 +6,150 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
-	"github.com/go-git/go-git/v5/plumbing/format/index"
-	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"git.sr.ht/~stephan/dotmgr/internal/atomicfile"
 )
 
 // ErrConflicts is wrapped by ConflictError.
-var ErrConflicts = errors.New(
-	"local files differ from the repository",
-)
+var ErrConflicts = errors.New("local files differ from the repository")
 
-// ConflictError lists files that Sync refused to overwrite or delete.
+// ConflictError lists files that dotmgr refused to overwrite or delete.
 type ConflictError struct {
 	Paths []string
 }
 
 func (e *ConflictError) Error() string {
-	return fmt.Sprintf(
-		"%v: %s",
-		ErrConflicts,
-		strings.Join(e.Paths, ", "),
-	)
+	return fmt.Sprintf("%v: %s", ErrConflicts, strings.Join(e.Paths, ", "))
 }
 
 func (e *ConflictError) Unwrap() error { return ErrConflicts }
 
-// SyncResult summarizes what Sync changed in the working tree.
+// SyncResult summarizes what changed in the working tree.
 type SyncResult struct {
 	Written []string
 	Removed []string
 }
 
-type syncAction int
-
-const (
-	actionWrite  syncAction = iota
-	actionAdopt             // working tree already matches; only update index
-	actionDrop              // remove from the index only
-	actionDelete            // delete the file and remove it from the index
-)
-
-type plannedChange struct {
-	name   string
-	action syncAction
-	target treeEntry
-}
-
-// Sync brings the working tree and the index in line with commit target.
+// update makes the files on disk and the index follow target. current are
+// the files that dotmgr last put on disk, normally those of HEAD.
 //
-// With restore, files that already match the index are checked too, so
-// deleted or modified files are put back; without it only files that differ
-// between the index and target are touched, as after a fast-forward.
+// With restore, every file is checked, so deleted or modified files are put
+// back; without it only files that differ between current and target are
+// touched, as after a fast-forward.
 //
-// A local file is overwritten or deleted only when it is unmodified, that is,
-// identical to its index entry or already identical to the target. Anything
+// A file on disk is overwritten or deleted only when it is unmodified: equal
+// to one of its variants in current, or already equal to target. Anything
 // else is a conflict. Conflicts abort the whole operation before any file is
 // written, unless force is set.
-func (s *Store) Sync(
-	target plumbing.Hash,
+//
+// Index entries that are in neither current nor target, such as newly added
+// files, are kept.
+func (s *Store) update(
+	current map[string]treeEntry,
+	target map[string]treeEntry,
 	restore bool,
 	force bool,
 ) (SyncResult, error) {
 	var result SyncResult
 
-	targets, err := s.commitFiles(target)
-	if err != nil {
-		return result, err
+	for name := range target {
+		if err := validateName(name); err != nil {
+			return result, err
+		}
+	}
+
+	wanted := s.facts.show(target)
+	present := s.facts.show(current)
+
+	// Every committed content of a path counts as unmodified, so that a file
+	// can switch to another variant when the machine's class changes.
+	committed := map[string][]plumbing.Hash{}
+	for name, entry := range current {
+		filePath, _ := SplitName(name)
+		committed[filePath] = append(committed[filePath], entry.hash)
+	}
+
+	unmodified := func(filePath string, file *worktreeFile) bool {
+		return force || slices.Contains(committed[filePath], file.hash())
+	}
+
+	var writes, deletes, conflicts []string
+
+	for filePath, entry := range wanted {
+		if shown, ok := present[filePath]; ok && shown.treeEntry == entry.treeEntry && !restore {
+			continue
+		}
+
+		if s.traversesSymlink(filePath, wanted) {
+			return result, fmt.Errorf(
+				"refusing to write %q through a symbolic link in the repository",
+				filePath,
+			)
+		}
+
+		file, err := s.readWorktree(filePath, entry.mode)
+
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			writes = append(writes, filePath)
+		case err != nil:
+			conflicts = append(conflicts, filePath)
+		case file.hash() == entry.hash && file.mode == entry.mode:
+			// Already in place.
+		case unmodified(filePath, file):
+			writes = append(writes, filePath)
+		default:
+			conflicts = append(conflicts, filePath)
+		}
+	}
+
+	for filePath, entry := range present {
+		if _, kept := wanted[filePath]; kept {
+			continue
+		}
+
+		file, err := s.readWorktree(filePath, entry.mode)
+
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			conflicts = append(conflicts, filePath)
+		case unmodified(filePath, file):
+			deletes = append(deletes, filePath)
+		default:
+			conflicts = append(conflicts, filePath)
+		}
+	}
+
+	if len(conflicts) > 0 {
+		slices.Sort(conflicts)
+		return result, &ConflictError{Paths: conflicts}
+	}
+
+	slices.Sort(writes)
+	slices.Sort(deletes)
+
+	for _, filePath := range writes {
+		if err := s.writeFile(filePath, wanted[filePath].treeEntry); err != nil {
+			return result, err
+		}
+
+		result.Written = append(result.Written, filePath)
+	}
+
+	for _, filePath := range deletes {
+		err := os.Remove(s.absolutePath(filePath))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return result, fmt.Errorf("remove %q: %w", filePath, err)
+		}
+
+		result.Removed = append(result.Removed, filePath)
 	}
 
 	idx, err := s.loadIndex()
@@ -85,180 +157,29 @@ func (s *Store) Sync(
 		return result, err
 	}
 
-	symlinks := map[string]bool{}
-
-	for name, entry := range targets {
-		if err := validateName(name); err != nil {
-			return result, err
-		}
-
-		if entry.mode == filemode.Symlink {
-			symlinks[name] = true
+	for name := range current {
+		if _, kept := target[name]; !kept {
+			idx.Remove(name) // not in the index if the user untracked it
 		}
 	}
 
-	var changes []plannedChange
-	var conflicts []string
-
-	for name, wanted := range targets {
-		existing := indexEntry(idx, name)
-
-		if existing != nil &&
-			existing.Hash == wanted.hash &&
-			existing.Mode == wanted.mode &&
-			!restore {
-			continue
-		}
-
-		if traversesSymlink(name, symlinks) {
-			return result, fmt.Errorf(
-				"refusing to write %q through a symbolic link in the repository",
-				name,
-			)
-		}
-
-		file, err := s.readWorktree(name, wanted.mode)
-
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-			changes = append(changes, plannedChange{name, actionWrite, wanted})
-		case err != nil:
-			conflicts = append(conflicts, name)
-		case file.hash() == wanted.hash && file.mode == wanted.mode:
-			changes = append(changes, plannedChange{name, actionAdopt, wanted})
-		case force || (existing != nil && file.hash() == existing.Hash):
-			changes = append(changes, plannedChange{name, actionWrite, wanted})
-		default:
-			conflicts = append(conflicts, name)
-		}
+	for name, entry := range target {
+		setEntry(idx, name, entry.hash, entry.mode, 0, time.Time{})
 	}
 
-	for _, existing := range idx.Entries {
-		if _, kept := targets[existing.Name]; kept {
-			continue
-		}
-
-		file, err := s.readWorktree(existing.Name, existing.Mode)
-
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-			changes = append(changes, plannedChange{name: existing.Name, action: actionDrop})
-		case err != nil:
-			conflicts = append(conflicts, existing.Name)
-		case force || file.hash() == existing.Hash:
-			changes = append(changes, plannedChange{name: existing.Name, action: actionDelete})
-		default:
-			conflicts = append(conflicts, existing.Name)
-		}
-	}
-
-	if len(conflicts) > 0 && !force {
-		sort.Strings(conflicts)
-		return result, &ConflictError{Paths: conflicts}
-	}
-
-	sort.Slice(changes, func(left int, right int) bool {
-		return changes[left].name < changes[right].name
-	})
-
-	applyErr := s.applyChanges(idx, changes, &result)
-
-	if err := s.saveIndex(idx); err != nil {
-		return result, errors.Join(applyErr, err)
-	}
-
-	return result, applyErr
+	return result, s.saveIndex(idx)
 }
 
-// applyChanges performs the planned changes and records them in idx. It
-// stops at the first error; the changes made until then stay in idx.
-func (s *Store) applyChanges(
-	idx *index.Index,
-	changes []plannedChange,
-	result *SyncResult,
-) error {
-	for _, change := range changes {
-		switch change.action {
-		case actionDrop:
-			if _, err := idx.Remove(change.name); err != nil {
-				return fmt.Errorf("untrack %q: %w", change.name, err)
-			}
-
-		case actionDelete:
-			err := os.Remove(s.absolutePath(change.name))
-			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("remove %q: %w", change.name, err)
-			}
-
-			if _, err := idx.Remove(change.name); err != nil {
-				return fmt.Errorf("untrack %q: %w", change.name, err)
-			}
-
-			result.Removed = append(result.Removed, change.name)
-
-		case actionWrite, actionAdopt:
-			if change.action == actionWrite {
-				if err := s.writeFile(change.name, change.target); err != nil {
-					return err
-				}
-
-				result.Written = append(result.Written, change.name)
-			}
-
-			file, err := s.readWorktree(change.name, change.target.mode)
-			if err != nil {
-				return fmt.Errorf("read %q: %w", change.name, err)
-			}
-
-			setEntry(
-				idx,
-				change.name,
-				change.target.hash,
-				change.target.mode,
-				file.size,
-				file.modTime,
-			)
-		}
-	}
-
-	return nil
-}
-
-// traversesSymlink reports whether a parent directory of name is itself a
-// symlink tracked in the repository.
-func traversesSymlink(name string, symlinks map[string]bool) bool {
-	for parent := path.Dir(name); parent != "." && parent != "/"; parent = path.Dir(parent) {
-		if symlinks[parent] {
+// traversesSymlink reports whether a parent directory of filePath is itself
+// a symlink among files.
+func (s *Store) traversesSymlink(filePath string, files map[string]shownEntry) bool {
+	for parent := path.Dir(filePath); parent != "." && parent != "/"; parent = path.Dir(parent) {
+		if files[parent].mode == filemode.Symlink {
 			return true
 		}
 	}
 
 	return false
-}
-
-// commitFiles lists the files of commit hash.
-func (s *Store) commitFiles(hash plumbing.Hash) (map[string]treeEntry, error) {
-	commit, err := s.repo.CommitObject(hash)
-	if err != nil {
-		return nil, fmt.Errorf("load commit %s: %w", hash, err)
-	}
-
-	tree, err := commit.Tree()
-	if err != nil {
-		return nil, fmt.Errorf("load tree of commit %s: %w", hash, err)
-	}
-
-	files := map[string]treeEntry{}
-
-	err = tree.Files().ForEach(func(file *object.File) error {
-		files[file.Name] = treeEntry{hash: file.Hash, mode: file.Mode}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list files of commit %s: %w", hash, err)
-	}
-
-	return files, nil
 }
 
 func (s *Store) writeFile(name string, entry treeEntry) error {

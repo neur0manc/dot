@@ -159,14 +159,12 @@ func agentSigners() ([]xssh.Signer, error) {
 		return nil, errors.New("SSH_AUTH_SOCK is not set")
 	}
 
-	agent, connection, err := sshagent.New()
+	// The connection stays open: the signers use it during the handshake. It
+	// closes when the process exits.
+	agent, _, err := sshagent.New()
 	if err != nil {
 		return nil, err
 	}
-
-	// The connection must stay open until the handshake signs with these
-	// keys; it ends with the short-lived process.
-	_ = connection
 
 	return agent.Signers()
 }

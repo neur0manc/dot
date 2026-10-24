@@ -2,32 +2,108 @@ package app
 
 import (
 	"errors"
+	"flag"
 	"fmt"
-	"runtime"
+	"os"
 	"strings"
 
 	"git.sr.ht/~stephan/dotmgr/internal/store"
 )
 
-// takeFlag removes flag (or its short form) from args and reports whether it
-// was present.
-func takeFlag(args []string, long string, short string) ([]string, bool) {
-	var rest []string
-	found := false
+// newFlags returns an empty flag set for a command.
+func newFlags(name string) *flag.FlagSet {
+	return flag.NewFlagSet(name, flag.ContinueOnError)
+}
 
-	for _, arg := range args {
-		if arg == long || (short != "" && arg == short) {
-			found = true
+// optionalValue is a flag that can be given bare, as in --os, or with a
+// value, as in --os=linux.
+type optionalValue struct {
+	set   bool
+	value string
+}
+
+func (v *optionalValue) String() string { return v.value }
+
+// IsBoolFlag lets the flag package accept the flag without a value.
+func (v *optionalValue) IsBoolFlag() bool { return true }
+
+func (v *optionalValue) Set(value string) error {
+	v.set = true
+	if value != "true" { // what the flag package passes for a bare flag
+		v.value = value
+	}
+
+	return nil
+}
+
+// conditionFlags are the flags that limit files to some machines.
+type conditionFlags struct {
+	keys   []string
+	values map[string]*optionalValue
+}
+
+func addConditionFlags(flags *flag.FlagSet) *conditionFlags {
+	c := &conditionFlags{values: map[string]*optionalValue{}}
+
+	for _, flagKey := range []struct{ flag, key string }{
+		{"os", store.ConditionOS},
+		{"arch", store.ConditionArch},
+		{"class", store.ConditionClass},
+		{"host", store.ConditionHostname},
+	} {
+		value := &optionalValue{}
+		flags.Var(value, flagKey.flag, "")
+		c.keys = append(c.keys, flagKey.key)
+		c.values[flagKey.key] = value
+	}
+
+	return c
+}
+
+// conditions returns the given conditions in a fixed order, so that the same
+// flags always name the same variant.
+func (c *conditionFlags) conditions(facts store.Facts, args []string) ([]string, error) {
+	var conditions []string
+
+	for _, key := range c.keys {
+		value := c.values[key]
+		if !value.set {
 			continue
 		}
 
-		rest = append(rest, arg)
+		// "--host macbook" makes macbook a path. Point that out instead
+		// of failing to find the file.
+		if value.value == "" {
+			for _, arg := range args {
+				if _, err := os.Lstat(arg); err != nil && !strings.ContainsAny(arg, `/\~`) {
+					return nil, usageError{fmt.Sprintf(
+						"%q is not a file; to name a value, write --%s=%s",
+						arg, flagName(key), arg,
+					)}
+				}
+			}
+		}
+
+		condition, err := facts.Condition(key, value.value)
+		if err != nil {
+			return nil, err
+		}
+
+		conditions = append(conditions, condition)
 	}
 
-	return rest, found
+	return conditions, nil
 }
 
-func runInit(c *context, args []string) error {
+func flagName(key string) string {
+	if key == store.ConditionHostname {
+		return "host"
+	}
+
+	return key
+}
+
+func runInit(c *cli, args []string) error {
 	if len(args) != 0 {
 		return usageError{"init takes no arguments"}
 	}
@@ -47,8 +123,15 @@ func runInit(c *context, args []string) error {
 	return nil
 }
 
-func runClone(c *context, args []string) error {
-	args, force := takeFlag(args, "--force", "-f")
+func runClone(c *cli, args []string) error {
+	flags := newFlags("clone")
+	force := flags.Bool("force", false, "")
+
+	args, err := parseFlags(flags, args)
+	if err != nil {
+		return err
+	}
+
 	if len(args) != 1 {
 		return usageError{"clone needs exactly one URL"}
 	}
@@ -61,7 +144,7 @@ func runClone(c *context, args []string) error {
 	s, result, err := store.Clone(gitDir, home, args[0], c.stderr)
 
 	var conflict *store.ConflictError
-	if errors.As(err, &conflict) && force {
+	if errors.As(err, &conflict) && *force {
 		result, err = s.Checkout(true)
 	}
 
@@ -80,75 +163,10 @@ func runClone(c *context, args []string) error {
 	fmt.Fprintf(c.stdout, "Cloned %s into %s.\n", args[0], gitDir)
 	printResult(c, result)
 
-	return applyAlternates(c, s, false, false)
-}
-
-// applyAlternates runs Alt for the current machine and reports the outcome.
-// Conflicts are an error only when strict is set (the alt command); after
-// clone, pull and checkout they are warnings.
-func applyAlternates(
-	c *context,
-	s *store.Store,
-	force bool,
-	strict bool,
-) error {
-	facts, err := s.SystemFacts()
-	if err != nil {
-		return err
-	}
-
-	result, err := s.Alt(facts, force)
-	if err != nil {
-		return err
-	}
-
-	for _, change := range result.Created {
-		verb := "linked"
-		if change.Copy {
-			verb = "copied"
-		}
-
-		fmt.Fprintf(c.stdout, "  %s %s <- %s\n", verb, change.Name, change.Source)
-	}
-
-	for _, name := range result.Removed {
-		fmt.Fprintf(c.stdout, "  removed %s\n", name)
-	}
-
-	if len(result.Conflicts) == 0 {
-		return nil
-	}
-
-	message := fmt.Sprintf(
-		"not replaced, because dotmgr did not create them: %s\n"+
-			"Run `dotmgr alt --force` to replace them",
-		strings.Join(result.Conflicts, ", "),
-	)
-
-	if strict {
-		return errors.New(message)
-	}
-
-	fmt.Fprintf(c.stderr, "warning: %s\n", message)
-
 	return nil
 }
 
-func runAlt(c *context, args []string) error {
-	args, force := takeFlag(args, "--force", "-f")
-	if len(args) != 0 {
-		return usageError{"unexpected argument " + args[0]}
-	}
-
-	s, err := c.open()
-	if err != nil {
-		return err
-	}
-
-	return applyAlternates(c, s, force, true)
-}
-
-func printResult(c *context, result store.SyncResult) {
+func printResult(c *cli, result store.SyncResult) {
 	for _, name := range result.Written {
 		fmt.Fprintf(c.stdout, "  wrote   %s\n", name)
 	}
@@ -158,34 +176,11 @@ func printResult(c *context, result store.SyncResult) {
 	}
 }
 
-// takeOption removes "--name value" or "--name=value" from args.
-func takeOption(args []string, name string) ([]string, string, error) {
-	var rest []string
-	value := ""
+func runAdd(c *cli, args []string) error {
+	flags := newFlags("add")
+	conditionFlags := addConditionFlags(flags)
 
-	for index := 0; index < len(args); index++ {
-		arg := args[index]
-
-		switch {
-		case arg == name:
-			if index+1 >= len(args) {
-				return nil, "", usageError{name + " needs a value"}
-			}
-
-			index++
-			value = args[index]
-		case strings.HasPrefix(arg, name+"="):
-			value = strings.TrimPrefix(arg, name+"=")
-		default:
-			rest = append(rest, arg)
-		}
-	}
-
-	return rest, value, nil
-}
-
-func runAdd(c *context, args []string) error {
-	args, conditions, err := takeOption(args, "--alt")
+	args, err := parseFlags(flags, args)
 	if err != nil {
 		return err
 	}
@@ -199,49 +194,44 @@ func runAdd(c *context, args []string) error {
 		return err
 	}
 
-	if conditions != "" {
-		return runAddAlternate(c, s, conditions, args)
-	}
-
-	names, err := s.Add(args...)
+	conditions, err := conditionFlags.conditions(s.Facts(), args)
 	if err != nil {
 		return err
 	}
 
-	for _, name := range names {
-		fmt.Fprintf(c.stdout, "Added %s\n", name)
+	var added []store.AddedFile
+	if len(conditions) == 0 {
+		added, err = s.Add(args...)
+	} else {
+		added, err = s.AddVariant(conditions, args...)
+	}
+	if err != nil {
+		return err
+	}
+
+	for _, file := range added {
+		switch {
+		case file.Replaces != "":
+			fmt.Fprintf(c.stdout, "Added %s, which replaces the plain %s\n", store.Describe(file.Name), file.Replaces)
+		case !file.Used:
+			fmt.Fprintf(c.stdout, "Added %s; this machine does not use it\n", store.Describe(file.Name))
+		default:
+			fmt.Fprintf(c.stdout, "Added %s\n", store.Describe(file.Name))
+		}
 	}
 
 	return nil
 }
 
-func runAddAlternate(
-	c *context,
-	s *store.Store,
-	conditions string,
-	args []string,
-) error {
-	result, err := s.AddAlternate(conditions, args...)
+func runRemove(c *cli, args []string) error {
+	flags := newFlags("rm")
+	conditionFlags := addConditionFlags(flags)
+
+	args, err := parseFlags(flags, args)
 	if err != nil {
 		return err
 	}
 
-	for _, name := range result.Added {
-		fmt.Fprintf(c.stdout, "Added %s\n", name)
-	}
-
-	for _, name := range result.Copied {
-		fmt.Fprintf(
-			c.stdout,
-			"Kept %s as it is: the alternate does not apply to this machine\n",
-			name,
-		)
-	}
-
-	return applyAlternates(c, s, false, true)
-}
-
-func runRemove(c *context, args []string) error {
 	if len(args) == 0 {
 		return usageError{"rm needs at least one path"}
 	}
@@ -251,19 +241,24 @@ func runRemove(c *context, args []string) error {
 		return err
 	}
 
-	names, err := s.Remove(args...)
+	conditions, err := conditionFlags.conditions(s.Facts(), args)
+	if err != nil {
+		return err
+	}
+
+	names, err := s.Remove(conditions, args...)
 	if err != nil {
 		return err
 	}
 
 	for _, name := range names {
-		fmt.Fprintf(c.stdout, "Untracked %s\n", name)
+		fmt.Fprintf(c.stdout, "Untracked %s\n", store.Describe(name))
 	}
 
 	return nil
 }
 
-func runList(c *context, args []string) error {
+func runList(c *cli, args []string) error {
 	if len(args) != 0 {
 		return usageError{"list takes no arguments"}
 	}
@@ -273,19 +268,24 @@ func runList(c *context, args []string) error {
 		return err
 	}
 
-	names, err := s.Tracked()
+	files, err := s.Tracked()
 	if err != nil {
 		return err
 	}
 
-	for _, name := range names {
-		fmt.Fprintln(c.stdout, name)
+	for _, file := range files {
+		line := store.Describe(file.Name)
+		if !file.Used {
+			line += " [not on this machine]"
+		}
+
+		fmt.Fprintln(c.stdout, line)
 	}
 
 	return nil
 }
 
-func runStatus(c *context, args []string) error {
+func runStatus(c *cli, args []string) error {
 	if len(args) != 0 {
 		return usageError{"status takes no arguments"}
 	}
@@ -301,7 +301,7 @@ func runStatus(c *context, args []string) error {
 	}
 
 	for _, state := range states {
-		fmt.Fprintln(c.stdout, state)
+		fmt.Fprintf(c.stdout, "%c%c %s\n", state.Staged, state.Worktree, store.Describe(state.Name))
 	}
 
 	if len(states) == 0 {
@@ -311,8 +311,16 @@ func runStatus(c *context, args []string) error {
 	return nil
 }
 
-func runDiff(c *context, args []string) error {
-	args, staged := takeFlag(args, "--staged", "--cached")
+func runDiff(c *cli, args []string) error {
+	flags := newFlags("diff")
+	staged := flags.Bool("staged", false, "")
+	flags.BoolVar(staged, "cached", false, "")
+
+	args, err := parseFlags(flags, args)
+	if err != nil {
+		return err
+	}
+
 	if len(args) != 0 {
 		return usageError{"unexpected argument " + args[0]}
 	}
@@ -322,16 +330,16 @@ func runDiff(c *context, args []string) error {
 		return err
 	}
 
-	diffs, err := s.Diff(staged)
+	diffs, err := s.Diff(*staged)
 	if err != nil {
 		return err
 	}
 
 	for _, diff := range diffs {
-		fmt.Fprintf(c.stdout, "diff --dotmgr a/%s b/%s\n", diff.Name, diff.Name)
+		fmt.Fprintf(c.stdout, "diff --dotmgr %s\n", store.Describe(diff.Name))
 
 		if diff.Binary {
-			fmt.Fprintf(c.stdout, "Binary files differ: %s\n", diff.Name)
+			fmt.Fprintf(c.stdout, "Binary files differ: %s\n", diff.Path)
 			continue
 		}
 
@@ -341,14 +349,23 @@ func runDiff(c *context, args []string) error {
 	return nil
 }
 
-func runCommit(c *context, args []string) error {
-	if len(args) != 2 || (args[0] != "-m" && args[0] != "--message") {
-		return usageError{"commit needs a message"}
+func runCommit(c *cli, args []string) error {
+	flags := newFlags("commit")
+	message := flags.String("m", "", "")
+	flags.StringVar(message, "message", "", "")
+
+	args, err := parseFlags(flags, args)
+	if err != nil {
+		return err
 	}
 
-	message := strings.TrimSpace(args[1])
-	if message == "" {
-		return usageError{"commit message must not be empty"}
+	if len(args) != 0 {
+		return usageError{"unexpected argument " + args[0]}
+	}
+
+	*message = strings.TrimSpace(*message)
+	if *message == "" {
+		return usageError{"commit needs a message"}
 	}
 
 	s, err := c.open()
@@ -356,7 +373,7 @@ func runCommit(c *context, args []string) error {
 		return err
 	}
 
-	hash, err := s.Commit(message)
+	hash, err := s.Commit(*message)
 	if errors.Is(err, store.ErrNoStagedChanges) {
 		fmt.Fprintln(c.stdout, "Nothing to commit.")
 		return nil
@@ -365,13 +382,20 @@ func runCommit(c *context, args []string) error {
 		return err
 	}
 
-	fmt.Fprintf(c.stdout, "Committed %.12s: %s\n", hash, message)
+	fmt.Fprintf(c.stdout, "Committed %.12s: %s\n", hash, *message)
 
 	return nil
 }
 
-func runCheckout(c *context, args []string) error {
-	args, force := takeFlag(args, "--force", "-f")
+func runCheckout(c *cli, args []string) error {
+	flags := newFlags("checkout")
+	force := flags.Bool("force", false, "")
+
+	args, err := parseFlags(flags, args)
+	if err != nil {
+		return err
+	}
+
 	if len(args) != 0 {
 		return usageError{"unexpected argument " + args[0]}
 	}
@@ -381,7 +405,7 @@ func runCheckout(c *context, args []string) error {
 		return err
 	}
 
-	result, err := s.Checkout(force)
+	result, err := s.Checkout(*force)
 	if err != nil {
 		return conflictHint(err, "--force")
 	}
@@ -392,24 +416,20 @@ func runCheckout(c *context, args []string) error {
 		fmt.Fprintln(c.stdout, "Nothing to restore.")
 	}
 
-	return applyAlternates(c, s, false, false)
+	return nil
 }
 
 // conflictHint explains how to resolve a ConflictError.
 func conflictHint(err error, flag string) error {
 	var conflict *store.ConflictError
 	if errors.As(err, &conflict) {
-		return fmt.Errorf(
-			"%w\nNothing was changed; rerun with %s to overwrite them",
-			err,
-			flag,
-		)
+		return fmt.Errorf("%w\nNothing was changed; rerun with %s to overwrite them", err, flag)
 	}
 
 	return err
 }
 
-func runConfig(c *context, args []string) error {
+func runConfig(c *cli, args []string) error {
 	if len(args) != 1 && len(args) != 2 {
 		return usageError{"config needs a key and an optional value"}
 	}
@@ -419,25 +439,49 @@ func runConfig(c *context, args []string) error {
 		return err
 	}
 
-	if len(args) == 2 {
-		return s.SetUserConfig(args[0], args[1])
+	if len(args) == 1 {
+		value, err := s.Config(args[0])
+		if err != nil {
+			return err
+		}
+
+		if value == "" {
+			return fmt.Errorf("%s is not configured", args[0])
+		}
+
+		fmt.Fprintln(c.stdout, value)
+
+		return nil
 	}
 
-	value, err := s.UserConfig(args[0])
-	if err != nil {
+	if err := s.SetConfig(args[0], args[1]); err != nil {
 		return err
 	}
 
-	if value == "" {
-		return fmt.Errorf("%s is not configured", args[0])
+	if args[0] != store.ClassConfigKey {
+		return nil
 	}
 
-	fmt.Fprintln(c.stdout, value)
+	// Other variants may fit now.
+	if _, err := s.Head(); err != nil {
+		return nil // nothing committed yet
+	}
 
-	return nil
+	result, err := s.Checkout(false)
+
+	var conflict *store.ConflictError
+	if errors.As(err, &conflict) {
+		fmt.Fprintf(c.stderr, "warning: %v\nRun `dotmgr checkout` once they are committed, "+
+			"or `dotmgr checkout --force` to overwrite them\n", err)
+		return nil
+	}
+
+	printResult(c, result)
+
+	return err
 }
 
-func runRemote(c *context, args []string) error {
+func runRemote(c *cli, args []string) error {
 	if len(args) == 0 {
 		return usageError{"remote needs an operation: add or list"}
 	}
@@ -491,7 +535,7 @@ func remoteArgument(args []string) (string, error) {
 	}
 }
 
-func runPush(c *context, args []string) error {
+func runPush(c *cli, args []string) error {
 	remote, err := remoteArgument(args)
 	if err != nil {
 		return err
@@ -517,8 +561,14 @@ func runPush(c *context, args []string) error {
 	return nil
 }
 
-func runPull(c *context, args []string) error {
-	args, force := takeFlag(args, "--force", "-f")
+func runPull(c *cli, args []string) error {
+	flags := newFlags("pull")
+	force := flags.Bool("force", false, "")
+
+	args, err := parseFlags(flags, args)
+	if err != nil {
+		return err
+	}
 
 	remote, err := remoteArgument(args)
 	if err != nil {
@@ -530,7 +580,7 @@ func runPull(c *context, args []string) error {
 		return err
 	}
 
-	updated, err := s.Pull(remote, force, c.stderr)
+	updated, err := s.Pull(remote, *force, c.stderr)
 	if err != nil {
 		return conflictHint(err, "--force")
 	}
@@ -542,10 +592,10 @@ func runPull(c *context, args []string) error {
 
 	fmt.Fprintf(c.stdout, "Updated current branch from %s.\n", remote)
 
-	return applyAlternates(c, s, false, false)
+	return nil
 }
 
-func runRepoPath(c *context, args []string) error {
+func runRepoPath(c *cli, args []string) error {
 	if len(args) != 0 {
 		return usageError{"repo-path takes no arguments"}
 	}
@@ -560,24 +610,45 @@ func runRepoPath(c *context, args []string) error {
 	return nil
 }
 
-func runPlatform(c *context, args []string) error {
-	fmt.Fprintf(c.stdout, "%s/%s\n", runtime.GOOS, runtime.GOARCH)
+// runPlatform shows the facts that variants are matched against. The class
+// needs a repository; without one it is left out.
+func runPlatform(c *cli, args []string) error {
+	if len(args) != 0 {
+		return usageError{"platform takes no arguments"}
+	}
+
+	gitDir, home, err := locations()
+	if err != nil {
+		return err
+	}
+
+	s, err := store.Open(gitDir, home)
+	if err != nil && !errors.Is(err, store.ErrNotInitialized) {
+		return err
+	}
+
+	var facts store.Facts
+	if s != nil {
+		facts = s.Facts()
+	} else if facts, err = store.MachineFacts(); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(c.stdout, "os:    %s\narch:  %s\nhost:  %s\n", facts.OS, facts.Arch, facts.Hostname)
+
+	if facts.Class != "" {
+		fmt.Fprintf(c.stdout, "class: %s\n", facts.Class)
+	}
+
 	return nil
 }
 
-func runVersion(c *context, args []string) error {
-	fmt.Fprintf(
-		c.stdout,
-		"dotmgr %s\ncommit: %s\nbuilt: %s\n",
-		c.build.Version,
-		c.build.Commit,
-		c.build.Date,
-	)
-
+func runVersion(c *cli, args []string) error {
+	fmt.Fprintf(c.stdout, "dotmgr %s\ncommit: %s\nbuilt: %s\n", c.build.Version, c.build.Commit, c.build.Date)
 	return nil
 }
 
-func runHelp(c *context, args []string) error {
+func runHelp(c *cli, args []string) error {
 	printUsage(c.stdout)
 	return nil
 }

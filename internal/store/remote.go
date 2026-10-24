@@ -1,8 +1,9 @@
 package store
 
 import (
+	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/go-git/go-git/v5/config"
@@ -20,11 +21,11 @@ func (s *Store) AddRemote(name string, url string) error {
 	url = strings.TrimSpace(url)
 
 	if name == "" {
-		return fmt.Errorf("remote name must not be empty")
+		return errors.New("remote name must not be empty")
 	}
 
 	if url == "" {
-		return fmt.Errorf("remote URL must not be empty")
+		return errors.New("remote URL must not be empty")
 	}
 
 	_, err := s.repo.CreateRemote(&config.RemoteConfig{
@@ -56,9 +57,7 @@ func (s *Store) Remotes() ([]Remote, error) {
 		})
 	}
 
-	sort.Slice(result, func(left int, right int) bool {
-		return result[left].Name < result[right].Name
-	})
+	slices.SortFunc(result, func(a, b Remote) int { return strings.Compare(a.Name, b.Name) })
 
 	return result, nil
 }

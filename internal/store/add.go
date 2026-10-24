@@ -4,9 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -73,9 +74,37 @@ func relativeTo(base string, candidate string) (string, bool) {
 	return filepath.ToSlash(relative), true
 }
 
+// AddedFile describes a file that Add staged.
+type AddedFile struct {
+	Name     string // the tracked name, e.g. ".zshrc##os.darwin"
+	Used     bool   // false for a variant that does not fit this machine
+	Replaces string // the plain file that became this variant, if any
+}
+
 // Add stages the given files, or all files beneath the given directories.
-// It returns the names that were staged.
-func (s *Store) Add(arguments ...string) ([]string, error) {
+// A file that has variants updates the variant used on this machine; if
+// none fits, the file becomes the plain fallback for such machines.
+func (s *Store) Add(arguments ...string) ([]AddedFile, error) {
+	return s.add(nil, arguments)
+}
+
+// AddVariant stages the given files as the variant for conditions, built
+// with Facts.Condition.
+//
+// When this machine fits the conditions and the file so far was tracked
+// plainly, without variants, the plain file is replaced: the file is limited
+// to such machines. Otherwise the variant is stored next to what is tracked
+// already, so a variant for other machines keeps the plain file as the
+// fallback.
+func (s *Store) AddVariant(conditions []string, arguments ...string) ([]AddedFile, error) {
+	if len(conditions) == 0 {
+		return nil, errors.New("no conditions given")
+	}
+
+	return s.add(conditions, arguments)
+}
+
+func (s *Store) add(conditions []string, arguments []string) ([]AddedFile, error) {
 	if len(arguments) == 0 {
 		return nil, errors.New("no paths given")
 	}
@@ -85,45 +114,47 @@ func (s *Store) Add(arguments ...string) ([]string, error) {
 		return nil, fmt.Errorf("resolve repository directory: %w", err)
 	}
 
-	var names []string
+	var paths []string
 
 	for _, argument := range arguments {
-		full, name, err := s.resolve(argument)
+		full, filePath, err := s.resolve(argument)
 		if err != nil {
 			return nil, err
 		}
 
-		if _, inside := relativeTo(canonicalGitDir, full); inside ||
-			full == canonicalGitDir {
-			return nil, fmt.Errorf(
-				"cannot track %q because it is inside the dotmgr repository",
-				argument,
-			)
+		if _, inside := relativeTo(canonicalGitDir, full); inside || full == canonicalGitDir {
+			return nil, fmt.Errorf("cannot track %q because it is inside the dotmgr repository", argument)
 		}
 
-		collected, err := collectFiles(full, name, canonicalGitDir)
+		collected, err := collectFiles(full, filePath, canonicalGitDir)
 		if err != nil {
 			return nil, err
 		}
 
-		names = append(names, collected...)
+		paths = append(paths, collected...)
 	}
+
+	slices.Sort(paths)
+	paths = slices.Compact(paths)
 
 	idx, err := s.loadIndex()
 	if err != nil {
 		return nil, err
 	}
 
-	names = unique(names)
+	files := indexFiles(idx)
+	shown := s.facts.show(files)
 
-	for _, name := range names {
-		if err := validateName(name); err != nil {
+	var added []AddedFile
+
+	for _, filePath := range paths {
+		if err := validateName(filePath); err != nil {
 			return nil, err
 		}
 
-		file, err := s.readWorktree(name, 0)
+		file, err := s.readWorktree(filePath, shown[filePath].mode)
 		if err != nil {
-			return nil, fmt.Errorf("read %q: %w", name, err)
+			return nil, fmt.Errorf("read %q: %w", filePath, err)
 		}
 
 		hash, err := s.writeBlob(file.data)
@@ -131,23 +162,59 @@ func (s *Store) Add(arguments ...string) ([]string, error) {
 			return nil, err
 		}
 
-		setEntry(idx, name, hash, file.mode, file.size, file.modTime)
+		result := AddedFile{Name: filePath}
+
+		switch {
+		case conditions != nil:
+			result.Name = VariantName(filePath, conditions)
+
+			_, fitsHere := s.facts.score(conditions)
+			variants := variantsOf(files, filePath)
+
+			if fitsHere && len(variants) == 1 && variants[0] == filePath {
+				idx.Remove(filePath)
+				result.Replaces = filePath
+			}
+		case shown[filePath].name != "":
+			result.Name = shown[filePath].name
+		}
+
+		setEntry(idx, result.Name, hash, file.mode, file.size, file.modTime)
+		added = append(added, result)
 	}
 
 	if err := s.saveIndex(idx); err != nil {
 		return nil, err
 	}
 
-	return names, nil
+	shown = s.facts.show(indexFiles(idx))
+	for index, result := range added {
+		filePath, _ := SplitName(result.Name)
+		added[index].Used = shown[filePath].name == result.Name
+	}
+
+	return added, nil
+}
+
+// variantsOf returns the tracked names that are stored for filePath: the
+// plain file and its variants.
+func variantsOf(files map[string]treeEntry, filePath string) []string {
+	var names []string
+
+	for name := range files {
+		if p, _ := SplitName(name); p == filePath {
+			names = append(names, name)
+		}
+	}
+
+	slices.Sort(names)
+
+	return names
 }
 
 // collectFiles lists the trackable files at full. A directory is walked
 // recursively; the repository directory and ".git" directories are skipped.
-func collectFiles(
-	full string,
-	name string,
-	gitDir string,
-) ([]string, error) {
+func collectFiles(full string, name string, gitDir string) ([]string, error) {
 	info, err := os.Lstat(full)
 	if err != nil {
 		return nil, fmt.Errorf("inspect %q: %w", full, err)
@@ -155,20 +222,10 @@ func collectFiles(
 
 	if !info.IsDir() {
 		if !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
-			return nil, fmt.Errorf(
-				"%q is not a regular file, symlink or directory",
-				full,
-			)
+			return nil, fmt.Errorf("%q is not a regular file, symlink or directory", full)
 		}
 
-		if hasAlternates(full) {
-			return nil, fmt.Errorf(
-				"%q is generated from its ## alternates; add those instead",
-				full,
-			)
-		}
-
-		return []string{name}, nil
+		return []string{name}, checkPlainName(name)
 	}
 
 	var names []string
@@ -190,18 +247,15 @@ func collectFiles(
 			return nil
 		}
 
-		if hasAlternates(path) {
-			return nil // generated by `dotmgr alt`
-		}
-
 		relative, err := filepath.Rel(full, path)
 		if err != nil {
 			return err
 		}
 
-		names = append(names, name+"/"+filepath.ToSlash(relative))
+		name := name + "/" + filepath.ToSlash(relative)
+		names = append(names, name)
 
-		return nil
+		return checkPlainName(name)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("walk %q: %w", full, err)
@@ -210,23 +264,24 @@ func collectFiles(
 	return names, nil
 }
 
-func unique(names []string) []string {
-	sort.Strings(names)
-
-	result := names[:0]
-
-	for index, name := range names {
-		if index == 0 || name != names[index-1] {
-			result = append(result, name)
-		}
+// checkPlainName rejects files whose names look like variants.
+func checkPlainName(name string) error {
+	if _, conditions := SplitName(name); conditions != nil {
+		return fmt.Errorf(
+			"%q has %q in its name, which marks variants in the repository; "+
+				"rename it and add it with conditions instead",
+			name, variantSeparator,
+		)
 	}
 
-	return result
+	return nil
 }
 
-// Remove stops tracking the given files, or all tracked files beneath the
-// given directories. Files in the working tree are left alone.
-func (s *Store) Remove(arguments ...string) ([]string, error) {
+// Remove stops tracking the given files, or all tracked files and variants
+// beneath the given directories. For a file with variants it removes the
+// variant for conditions, or the variant used on this machine when
+// conditions is empty. Files on disk are left alone.
+func (s *Store) Remove(conditions []string, arguments ...string) ([]string, error) {
 	if len(arguments) == 0 {
 		return nil, errors.New("no paths given")
 	}
@@ -236,29 +291,51 @@ func (s *Store) Remove(arguments ...string) ([]string, error) {
 		return nil, err
 	}
 
+	files := indexFiles(idx)
+	shown := s.facts.show(files)
+
 	var removed []string
 
 	for _, argument := range arguments {
-		_, name, err := s.resolve(argument)
+		_, filePath, err := s.resolve(argument)
 		if err != nil {
 			return nil, err
 		}
 
-		found := false
+		before := len(removed)
 
-		for _, entry := range idx.Entries {
-			if entry.Name == name || strings.HasPrefix(entry.Name, name+"/") {
-				removed = append(removed, entry.Name)
-				found = true
+		for name := range files {
+			if p, _ := SplitName(name); strings.HasPrefix(p, filePath+"/") {
+				removed = append(removed, name)
 			}
 		}
 
-		if !found {
+		variants := variantsOf(files, filePath)
+
+		switch {
+		case len(conditions) > 0:
+			name := VariantName(filePath, conditions)
+			if !slices.Contains(variants, name) {
+				return nil, fmt.Errorf("%s is not tracked", Describe(name))
+			}
+
+			removed = append(removed, name)
+		case shown[filePath].name != "":
+			removed = append(removed, shown[filePath].name)
+		case len(variants) > 0:
+			return nil, fmt.Errorf(
+				"no variant of %q is used on this machine; say which one to remove",
+				argument,
+			)
+		}
+
+		if len(removed) == before {
 			return nil, fmt.Errorf("%q is not tracked", argument)
 		}
 	}
 
-	removed = unique(removed)
+	slices.Sort(removed)
+	removed = slices.Compact(removed)
 
 	for _, name := range removed {
 		if _, err := idx.Remove(name); err != nil {
@@ -273,20 +350,33 @@ func (s *Store) Remove(arguments ...string) ([]string, error) {
 	return removed, nil
 }
 
-// Tracked returns the names of all tracked files, sorted.
-func (s *Store) Tracked() ([]string, error) {
+// TrackedFile is a tracked file or variant.
+type TrackedFile struct {
+	Name string // the tracked name, e.g. ".zshrc##os.darwin"
+	Path string // the path on disk, e.g. ".zshrc"
+	Used bool   // whether this machine uses it
+}
+
+// Tracked lists all tracked files and variants, sorted by name.
+func (s *Store) Tracked() ([]TrackedFile, error) {
 	idx, err := s.loadIndex()
 	if err != nil {
 		return nil, err
 	}
 
-	names := make([]string, 0, len(idx.Entries))
+	files := indexFiles(idx)
+	shown := s.facts.show(files)
 
-	for _, entry := range idx.Entries {
-		names = append(names, entry.Name)
+	tracked := make([]TrackedFile, 0, len(files))
+
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		filePath, _ := SplitName(name)
+		tracked = append(tracked, TrackedFile{
+			Name: name,
+			Path: filePath,
+			Used: shown[filePath].name == name,
+		})
 	}
 
-	sort.Strings(names)
-
-	return names, nil
+	return tracked, nil
 }

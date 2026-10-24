@@ -36,6 +36,7 @@ type Store struct {
 	repo   *git.Repository
 	gitDir string
 	home   string
+	facts  Facts // the machine that variants are chosen for
 }
 
 func newStorage(gitDir string) *filesystem.Storage {
@@ -55,7 +56,12 @@ func Open(gitDir string, home string) (*Store, error) {
 		return nil, fmt.Errorf("open repository at %q: %w", gitDir, err)
 	}
 
-	return &Store{repo: repo, gitDir: gitDir, home: home}, nil
+	s := &Store{repo: repo, gitDir: gitDir, home: home}
+	if err := s.loadFacts(); err != nil {
+		return nil, err
+	}
+
+	return s, nil
 }
 
 // Init creates a new, empty repository in gitDir.
@@ -105,6 +111,16 @@ func markNonBare(repo *git.Repository) error {
 	}
 
 	return nil
+}
+
+// Head returns the current commit.
+func (s *Store) Head() (plumbing.Hash, error) {
+	head, err := s.repo.Head()
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+
+	return head.Hash(), nil
 }
 
 // GitDir returns the directory holding the Git repository.

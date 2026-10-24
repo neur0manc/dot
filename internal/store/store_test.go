@@ -45,10 +45,10 @@ func (m machine) init(t *testing.T) *Store {
 		t.Fatalf("init: %v", err)
 	}
 
-	if err := s.SetUserConfig("user.name", "Test"); err != nil {
+	if err := s.SetConfig("user.name", "Test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetUserConfig("user.email", "test@example.com"); err != nil {
+	if err := s.SetConfig("user.email", "test@example.com"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -82,6 +82,15 @@ func (m machine) read(t *testing.T, name string) string {
 func (m machine) exists(name string) bool {
 	_, err := os.Lstat(filepath.Join(m.home, filepath.FromSlash(name)))
 	return err == nil
+}
+
+func addedNames(added []AddedFile) []string {
+	names := make([]string, 0, len(added))
+	for _, file := range added {
+		names = append(names, file.Name)
+	}
+
+	return names
 }
 
 func mustCommit(t *testing.T, s *Store, message string) {
@@ -158,7 +167,7 @@ func TestAddStatusCommitCycle(t *testing.T) {
 	}
 
 	want := ".config/app/a.conf,.config/app/b.conf,.vimrc"
-	if strings.Join(added, ",") != want {
+	if strings.Join(addedNames(added), ",") != want {
 		t.Fatalf("added %v, want %s", added, want)
 	}
 
@@ -248,7 +257,7 @@ func TestAddSkipsRepositoryInsideHome(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := strings.Join(added, ",")
+	got := strings.Join(addedNames(added), ",")
 	if got != ".local/share/dotmgr/other,.local/share/keep" {
 		t.Fatalf("added %s", got)
 	}
@@ -272,7 +281,7 @@ func TestRemoveUntracksButKeepsFile(t *testing.T) {
 
 	mustCommit(t, s, "initial")
 
-	removed, err := s.Remove("~/.d")
+	removed, err := s.Remove(nil, "~/.d")
 	if err != nil || len(removed) != 2 {
 		t.Fatalf("remove: %v %v", removed, err)
 	}
@@ -283,12 +292,12 @@ func TestRemoveUntracksButKeepsFile(t *testing.T) {
 		t.Fatal("rm must keep the file on disk")
 	}
 
-	if _, err := s.Remove("~/.d"); err == nil {
+	if _, err := s.Remove(nil, "~/.d"); err == nil {
 		t.Fatal("expected untracked path to be rejected")
 	}
 
 	tracked, _ := s.Tracked()
-	if strings.Join(tracked, ",") != ".a" {
+	if len(tracked) != 1 || tracked[0].Name != ".a" {
 		t.Fatalf("tracked = %v", tracked)
 	}
 }
@@ -407,7 +416,7 @@ func TestCloneAndPull(t *testing.T) {
 	if _, err := source.Add("~/.config/tool"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := source.Remove("~/.bashrc"); err != nil {
+	if _, err := source.Remove(nil, "~/.bashrc"); err != nil {
 		t.Fatal(err)
 	}
 	mustCommit(t, source, "update")
@@ -524,10 +533,10 @@ func TestPullRefusesStagedChangesAndDivergence(t *testing.T) {
 		t.Fatalf("want ErrPullStagedChanges, got %v", err)
 	}
 
-	if err := clone.SetUserConfig("user.name", "Test"); err != nil {
+	if err := clone.SetConfig("user.name", "Test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := clone.SetUserConfig("user.email", "test@example.com"); err != nil {
+	if err := clone.SetConfig("user.email", "test@example.com"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -613,7 +622,7 @@ func TestCheckoutRestoresDeletedFiles(t *testing.T) {
 }
 
 func TestSyncRejectsUnsafePaths(t *testing.T) {
-	for _, name := range []string{"../escape", "a/../b", ".git/config", "A/.GIT/x", "/abs", "a//b"} {
+	for _, name := range []string{"../escape", "a/../b", ".git/config", "A/.GIT/x", "/abs", "a//b", "..##os.linux"} {
 		if err := validateName(name); err == nil {
 			t.Errorf("validateName(%q) should fail", name)
 		}

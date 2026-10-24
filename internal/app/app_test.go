@@ -159,7 +159,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 }
 
-func TestAltCommand(t *testing.T) {
+func TestVariants(t *testing.T) {
 	home := setup(t)
 
 	must := func(args ...string) string {
@@ -174,96 +174,80 @@ func TestAltCommand(t *testing.T) {
 	}
 
 	must("init")
-	must("config", "local.class", "work")
+	must("config", "user.name", "Test")
+	must("config", "user.email", "test@example.com")
 
-	if got := strings.TrimSpace(must("config", "local.class")); got != "work" {
-		t.Fatalf("class = %q", got)
+	rc := filepath.Join(home, ".rc")
+	if err := os.WriteFile(rc, []byte("rc\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	for name, content := range map[string]string{
-		".gitconfig##default":    "personal\n",
-		".gitconfig##class.work": "work\n",
-	} {
-		if err := os.WriteFile(filepath.Join(home, name), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
+	must("add", "~/.rc")
+
+	// Limiting a plain file to this OS replaces it.
+	got := must("add", "~/.rc", "--os")
+	want := "Added .rc (os." + runtime.GOOS + "), which replaces the plain .rc\n"
+	if got != want {
+		t.Fatalf("add --os = %q, want %q", got, want)
+	}
+
+	// A variant for another class is stored, but not used here.
+	if got := must("add", "--class=server", "~/.rc"); !strings.Contains(got, "does not use it") {
+		t.Fatalf("add --class=server = %q", got)
+	}
+
+	if got := must("list"); got != ".rc (class.server) [not on this machine]\n.rc (os."+runtime.GOOS+")\n" {
+		t.Fatalf("list = %q", got)
+	}
+
+	must("commit", "-m", "variants")
+
+	// No ## files appear on disk.
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "##") {
+			t.Fatalf("found %s on disk", entry.Name())
 		}
 	}
 
-	must("add", "~/.gitconfig##default", "~/.gitconfig##class.work")
-
-	if got := must("alt"); !strings.Contains(got, ".gitconfig <- .gitconfig##class.work") {
-		t.Fatalf("alt output = %q", got)
+	// Edits go to the variant used here.
+	if err := os.WriteFile(rc, []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-
-	data, err := os.ReadFile(filepath.Join(home, ".gitconfig"))
-	if err != nil || string(data) != "work\n" {
-		t.Fatalf(".gitconfig = %q %v", data, err)
-	}
-
-	// The generated file does not show up as a change.
-	if got := must("status"); !strings.HasPrefix(got, "A  .gitconfig##") {
+	if got := must("status"); got != " M .rc (os."+runtime.GOOS+")\n" {
 		t.Fatalf("status = %q", got)
 	}
+	must("add", "~/.rc")
+	must("commit", "-m", "change")
 
-	// A foreign file is reported, not overwritten.
-	must("config", "local.class", "other")
-
-	if err := os.Remove(filepath.Join(home, ".gitconfig")); err != nil {
-		t.Fatal(err)
+	// With no variant for this OS, the plain file is the fallback.
+	must("rm", "--os", "~/.rc")
+	if got := must("add", "~/.rc"); got != "Added .rc\n" {
+		t.Fatalf("add = %q", got)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("mine\n"), 0o644); err != nil {
-		t.Fatal(err)
+	must("commit", "-m", "fallback")
+
+	// Switching the class switches the file, and back.
+	for _, step := range []struct{ class, content string }{{"server", "rc\n"}, {"client", "changed\n"}} {
+		class, content := step.class, step.content
+
+		if got := must("config", "local.class", class); !strings.Contains(got, "wrote   .rc") {
+			t.Fatalf("config local.class %s = %q", class, got)
+		}
+		if data, _ := os.ReadFile(rc); string(data) != content {
+			t.Fatalf("class %s: .rc = %q", class, data)
+		}
 	}
 
-	code, _, stderr := run(t, "alt")
-	if code != 1 || !strings.Contains(stderr, "alt --force") {
+	// A bare --host followed by a name is a likely mistake.
+	if code, _, stderr := run(t, "add", "--host", "macbook", "~/.rc"); code != 2 || !strings.Contains(stderr, "--host=macbook") {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}
-}
 
-func TestAddAltFlag(t *testing.T) {
-	home := setup(t)
-
-	must := func(args ...string) string {
-		t.Helper()
-
-		code, stdout, stderr := run(t, args...)
-		if code != 0 {
-			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
-		}
-
-		return stdout
-	}
-
-	must("init")
-
-	if err := os.WriteFile(filepath.Join(home, ".rc"), []byte("rc\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	hostname, _ := os.Hostname()
-	hostname, _, _ = strings.Cut(hostname, ".")
-
-	for _, form := range [][]string{
-		{"add", "--alt", "hostname." + hostname, "~/.rc"},
-	} {
-		got := must(form...)
-
-		if !strings.Contains(got, "Added .rc##hostname.") ||
-			(runtime.GOOS != "windows" && !strings.Contains(got, "linked .rc")) {
-			t.Fatalf("output = %q", got)
-		}
-	}
-
-	if data, err := os.ReadFile(filepath.Join(home, ".rc")); err != nil || string(data) != "rc\n" {
-		t.Fatalf(".rc = %q %v", data, err)
-	}
-
-	if code, _, stderr := run(t, "add", "--alt"); code != 2 {
-		t.Fatalf("missing value: code=%d stderr=%q", code, stderr)
-	}
-
-	if code, _, _ := run(t, "add", "--alt", "bogus", "~/.rc"); code != 1 {
+	if code, _, _ := run(t, "add", "--os=bogus/x", "~/.rc"); code != 1 {
 		t.Fatalf("bad condition should fail, code=%d", code)
 	}
 }

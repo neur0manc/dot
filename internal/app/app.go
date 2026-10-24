@@ -1,9 +1,12 @@
+// Package app implements dotmgr's command-line interface.
 package app
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"strings"
 
 	"git.sr.ht/~stephan/dotmgr/internal/paths"
 	"git.sr.ht/~stephan/dotmgr/internal/store"
@@ -21,21 +24,59 @@ type usageError struct{ message string }
 
 func (e usageError) Error() string { return e.message }
 
-// context carries everything a command needs.
-type context struct {
+// cli carries what every command needs.
+type cli struct {
 	stdout io.Writer
 	stderr io.Writer
 	build  BuildInfo
 }
 
 // open opens the repository, failing with a helpful message if none exists.
-func (c *context) open() (*store.Store, error) {
+// It also converts a home directory set up by dotmgr 0.3 to the current
+// layout of variants.
+func (c *cli) open() (*store.Store, error) {
 	gitDir, home, err := locations()
 	if err != nil {
 		return nil, err
 	}
 
-	return store.Open(gitDir, home)
+	s, err := store.Open(gitDir, home)
+	if err != nil {
+		return nil, err
+	}
+
+	notes, err := s.UpgradeLinkedVariants()
+	for _, note := range notes {
+		fmt.Fprintf(c.stderr, "upgrade: %s\n", note)
+	}
+
+	return s, err
+}
+
+// parseFlags parses flags anywhere among args, as Git does, and returns the
+// other arguments. A "--" ends the flags.
+func parseFlags(flags *flag.FlagSet, args []string) ([]string, error) {
+	flags.SetOutput(io.Discard)
+
+	var rest []string
+
+	for {
+		if err := flags.Parse(args); err != nil {
+			return nil, usageError{strings.Replace(err.Error(), "flag provided but not defined:", "unknown flag", 1)}
+		}
+
+		remaining := flags.Args()
+		if len(remaining) == 0 {
+			return rest, nil
+		}
+
+		if consumed := len(args) - len(remaining); consumed > 0 && args[consumed-1] == "--" {
+			return append(rest, remaining...), nil
+		}
+
+		rest = append(rest, remaining[0])
+		args = remaining[1:]
+	}
 }
 
 func locations() (gitDir string, home string, err error) {
@@ -56,40 +97,34 @@ type command struct {
 	name    string
 	args    string // argument synopsis shown in help
 	summary string
-	run     func(c *context, args []string) error
+	run     func(c *cli, args []string) error
 }
 
 func commands() []command {
 	return []command{
 		{"init", "", "Create an empty repository", runInit},
-		{"clone", "[--force] <url>", "Clone a repository and check its files out into $HOME", runClone},
-		{"add", "[--alt <conditions>] <path>...", "Track files, or all files in directories; --alt makes them per-OS/host alternates", runAdd},
-		{"rm", "<path>...", "Stop tracking files; the files stay on disk", runRemove},
-		{"list", "", "List tracked files", runList},
+		{"clone", "[--force] <url>", "Clone a repository and put its files into your home directory", runClone},
+		{"add", "[conditions] <path>...", "Track files, or all files in directories; conditions make them variants", runAdd},
+		{"rm", "[conditions] <path>...", "Stop tracking files; the files stay on disk", runRemove},
+		{"list", "", "List tracked files and variants", runList},
 		{"status", "", "Show staged and modified tracked files", runStatus},
 		{"diff", "[--staged]", "Show changes in tracked files", runDiff},
 		{"commit", "-m <message>", "Commit staged changes", runCommit},
 		{"checkout", "[--force]", "Restore tracked files from the last commit", runCheckout},
-		{"alt", "[--force]", "Link per-OS and per-host files (name##os.Linux, name##hostname.x)", runAlt},
 		{"config", "<user.name|user.email|local.class> [value]", "Read or set the commit identity or machine class", runConfig},
 		{"remote", "add <name> <url> | list", "Manage remotes", runRemote},
 		{"push", "[remote]", "Push the current branch; defaults to origin", runPush},
 		{"pull", "[--force] [remote]", "Fast-forward from a remote and update tracked files", runPull},
 		{"repo-path", "", "Show the Git directory", runRepoPath},
-		{"platform", "", "Show the operating system and architecture", runPlatform},
+		{"platform", "", "Show what variants are matched against", runPlatform},
 		{"version", "", "Show version information", runVersion},
 		{"help", "", "Show this help", runHelp},
 	}
 }
 
 // Run executes the command-line application and returns a process exit code.
-func Run(
-	args []string,
-	stdout io.Writer,
-	stderr io.Writer,
-	build BuildInfo,
-) int {
-	c := &context{stdout: stdout, stderr: stderr, build: build}
+func Run(args []string, stdout io.Writer, stderr io.Writer, build BuildInfo) int {
+	c := &cli{stdout: stdout, stderr: stderr, build: build}
 
 	if len(args) == 0 {
 		printUsage(stdout)
@@ -118,12 +153,7 @@ func Run(
 			return 0
 		case errors.As(err, &usage):
 			fmt.Fprintf(stderr, "error: %v\n", usage)
-			fmt.Fprintf(
-				stderr,
-				"usage: dotmgr %s %s\n",
-				candidate.name,
-				candidate.args,
-			)
+			fmt.Fprintf(stderr, "usage: dotmgr %s %s\n", candidate.name, candidate.args)
 			return 2
 		default:
 			fmt.Fprintf(stderr, "error: %v\n", err)
@@ -147,9 +177,7 @@ Usage:
 
 Commands:`)
 
-	table := commands()
-
-	for _, entry := range table {
+	for _, entry := range commands() {
 		synopsis := entry.name
 		if entry.args != "" {
 			synopsis += " " + entry.args
@@ -159,6 +187,15 @@ Commands:`)
 	}
 
 	fmt.Fprintln(output, `
+Conditions limit a file to some machines. Without a value they mean this
+machine; several must all match:
+  --os[=<os>]         linux, darwin (or macos), windows, ...; unix is
+                      every system except Windows
+  --host[=<name>]     a host name, without domain
+  --class[=<class>]   a class of machines, set with dotmgr config local.class
+  --arch[=<arch>]     amd64, arm64, ...
+Only the variant that fits best is put on disk, under the file's own name.
+
 Environment:
   DOTMGR_HOME   working tree (default: your home directory)
   DOTMGR_REPO   Git directory (default: user data directory)

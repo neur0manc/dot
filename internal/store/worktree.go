@@ -209,5 +209,10 @@ func validateName(name string) error {
 		}
 	}
 
+	// A variant must not escape through its path either: "..##os.linux".
+	if filePath, conditions := SplitName(name); conditions != nil {
+		return validateName(filePath)
+	}
+
 	return nil
 }

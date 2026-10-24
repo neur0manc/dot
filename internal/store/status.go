@@ -3,8 +3,9 @@ package store
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing"
@@ -42,32 +43,37 @@ type treeEntry struct {
 
 // headFiles lists the files of the HEAD commit; an unborn branch has none.
 func (s *Store) headFiles() (map[string]treeEntry, error) {
-	files := map[string]treeEntry{}
-
 	head, err := s.repo.Head()
 	if errors.Is(err, plumbing.ErrReferenceNotFound) {
-		return files, nil
+		return map[string]treeEntry{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve HEAD: %w", err)
 	}
 
-	commit, err := s.repo.CommitObject(head.Hash())
+	return s.commitFiles(head.Hash())
+}
+
+// commitFiles lists the files of commit hash.
+func (s *Store) commitFiles(hash plumbing.Hash) (map[string]treeEntry, error) {
+	commit, err := s.repo.CommitObject(hash)
 	if err != nil {
-		return nil, fmt.Errorf("load HEAD commit: %w", err)
+		return nil, fmt.Errorf("load commit %s: %w", hash, err)
 	}
 
 	tree, err := commit.Tree()
 	if err != nil {
-		return nil, fmt.Errorf("load HEAD tree: %w", err)
+		return nil, fmt.Errorf("load tree of commit %s: %w", hash, err)
 	}
+
+	files := map[string]treeEntry{}
 
 	err = tree.Files().ForEach(func(file *object.File) error {
 		files[file.Name] = treeEntry{hash: file.Hash, mode: file.Mode}
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list HEAD files: %w", err)
+		return nil, fmt.Errorf("list files of commit %s: %w", hash, err)
 	}
 
 	return files, nil
@@ -84,7 +90,8 @@ func indexFiles(idx *index.Index) map[string]treeEntry {
 }
 
 // Status reports every tracked file that differs from HEAD or the index.
-// Untracked files are never looked at.
+// Untracked files are never looked at, and neither are variants for other
+// machines, which have no file on disk here.
 func (s *Store) Status() ([]FileState, error) {
 	idx, err := s.loadIndex()
 	if err != nil {
@@ -101,11 +108,7 @@ func (s *Store) Status() ([]FileState, error) {
 
 	state := func(name string) *FileState {
 		if states[name] == nil {
-			states[name] = &FileState{
-				Name:     name,
-				Staged:   Unmodified,
-				Worktree: Unmodified,
-			}
+			states[name] = &FileState{Name: name, Staged: Unmodified, Worktree: Unmodified}
 		}
 
 		return states[name]
@@ -128,35 +131,33 @@ func (s *Store) Status() ([]FileState, error) {
 		}
 	}
 
-	for name, entry := range staged {
-		file, err := s.readWorktree(name, entry.mode)
+	for filePath, shown := range s.facts.show(staged) {
+		file, err := s.readWorktree(filePath, shown.mode)
 
 		switch {
 		case errors.Is(err, os.ErrNotExist):
-			state(name).Worktree = Deleted
+			state(shown.name).Worktree = Deleted
 		case err != nil:
-			return nil, fmt.Errorf("read %q: %w", name, err)
-		case file.hash() != entry.hash || file.mode != entry.mode:
-			state(name).Worktree = Modified
+			return nil, fmt.Errorf("read %q: %w", filePath, err)
+		case file.hash() != shown.hash || file.mode != shown.mode:
+			state(shown.name).Worktree = Modified
 		}
 	}
 
 	result := make([]FileState, 0, len(states))
-
 	for _, fileState := range states {
 		result = append(result, *fileState)
 	}
 
-	sort.Slice(result, func(left int, right int) bool {
-		return result[left].Name < result[right].Name
-	})
+	slices.SortFunc(result, func(a, b FileState) int { return strings.Compare(a.Name, b.Name) })
 
 	return result, nil
 }
 
 // FileDiff is the difference of one file between two states.
 type FileDiff struct {
-	Name   string
+	Name   string // the tracked name
+	Path   string // the path on disk
 	Binary bool
 	Patch  string
 }
@@ -169,71 +170,85 @@ func (s *Store) Diff(staged bool) ([]FileDiff, error) {
 		return nil, err
 	}
 
-	var oldFiles, newFiles map[string]treeEntry
-
 	if staged {
-		oldFiles, err = s.headFiles()
-		if err != nil {
-			return nil, err
-		}
-
-		newFiles = indexFiles(idx)
-	} else {
-		oldFiles = indexFiles(idx)
+		return s.stagedDiff(idx)
 	}
 
-	names := map[string]struct{}{}
-	for name := range oldFiles {
-		names[name] = struct{}{}
-	}
-	for name := range newFiles {
-		names[name] = struct{}{}
-	}
-
-	sorted := make([]string, 0, len(names))
-	for name := range names {
-		sorted = append(sorted, name)
-	}
-	sort.Strings(sorted)
-
+	shown := s.facts.show(indexFiles(idx))
 	var diffs []FileDiff
 
-	for _, name := range sorted {
-		before, existedBefore, err := s.sideContents(oldFiles, name)
+	for _, filePath := range slices.Sorted(maps.Keys(shown)) {
+		entry := shown[filePath]
+
+		before, err := s.blobContents(entry.hash)
 		if err != nil {
 			return nil, err
 		}
 
-		var after []byte
-		var existsAfter bool
+		file, err := s.readWorktree(filePath, entry.mode)
+		exists := err == nil
 
-		if staged {
-			after, existsAfter, err = s.sideContents(newFiles, name)
-		} else {
-			after, existsAfter, err = s.worktreeContents(oldFiles, name)
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		if existedBefore == existsAfter && string(before) == string(after) {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			return nil, fmt.Errorf("read %q: %w", filePath, err)
+		case file.hash() == entry.hash:
 			continue
 		}
 
-		diffs = append(diffs, buildDiff(
-			name,
-			before, existedBefore,
-			after, existsAfter,
-		))
+		var after []byte
+		if exists {
+			after = file.data
+		}
+
+		diffs = append(diffs, buildDiff(entry.name, filePath, before, true, after, exists))
 	}
 
 	return diffs, nil
 }
 
-func (s *Store) sideContents(
-	files map[string]treeEntry,
-	name string,
-) ([]byte, bool, error) {
+// stagedDiff compares HEAD with the index.
+func (s *Store) stagedDiff(idx *index.Index) ([]FileDiff, error) {
+	head, err := s.headFiles()
+	if err != nil {
+		return nil, err
+	}
+
+	staged := indexFiles(idx)
+
+	names := slices.Collect(maps.Keys(head))
+	for name := range staged {
+		if _, inHead := head[name]; !inHead {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+
+	var diffs []FileDiff
+
+	for _, name := range names {
+		if head[name] == staged[name] {
+			continue
+		}
+
+		before, existedBefore, err := s.entryContents(head, name)
+		if err != nil {
+			return nil, err
+		}
+
+		after, existsAfter, err := s.entryContents(staged, name)
+		if err != nil {
+			return nil, err
+		}
+
+		filePath, _ := SplitName(name)
+		diffs = append(diffs, buildDiff(name, filePath, before, existedBefore, after, existsAfter))
+	}
+
+	return diffs, nil
+}
+
+func (s *Store) entryContents(files map[string]treeEntry, name string) ([]byte, bool, error) {
 	entry, ok := files[name]
 	if !ok {
 		return nil, false, nil
@@ -247,34 +262,20 @@ func (s *Store) sideContents(
 	return data, true, nil
 }
 
-func (s *Store) worktreeContents(
-	reference map[string]treeEntry,
-	name string,
-) ([]byte, bool, error) {
-	file, err := s.readWorktree(name, reference[name].mode)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, fmt.Errorf("read %q: %w", name, err)
-	}
-
-	return file.data, true, nil
-}
-
 func buildDiff(
 	name string,
+	filePath string,
 	before []byte, existedBefore bool,
 	after []byte, existsAfter bool,
 ) FileDiff {
-	diff := FileDiff{Name: name}
+	diff := FileDiff{Name: name, Path: filePath}
 
 	if isBinary(before) || isBinary(after) {
 		diff.Binary = true
 		return diff
 	}
 
-	fromFile, toFile := "a/"+name, "b/"+name
+	fromFile, toFile := "a/"+filePath, "b/"+filePath
 	if !existedBefore {
 		fromFile = "/dev/null"
 	}
@@ -290,7 +291,7 @@ func buildDiff(
 		Context:  3,
 	})
 	if err != nil {
-		patch = fmt.Sprintf("cannot diff %s: %v\n", name, err)
+		patch = fmt.Sprintf("cannot diff %s: %v\n", filePath, err)
 	}
 
 	diff.Patch = ensureTrailingNewline(patch)

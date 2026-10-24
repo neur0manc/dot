@@ -1,3 +1,4 @@
+// Package paths finds the directories dotmgr works with.
 package paths
 
 import (
