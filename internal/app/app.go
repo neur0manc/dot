@@ -98,6 +98,7 @@ var aliases = map[string]string{
 	"ls": "list",
 	"s":  "status",
 	"p":  "push",
+	"d":  "diff",
 }
 
 type command struct {
@@ -116,7 +117,7 @@ func commands() []command {
 		{"list", "[<path>...]", "List tracked files and variants, or those at or beneath paths", runList},
 		{"status", "", "Show staged and modified tracked files", runStatus},
 		{"diff", "[--staged]", "Show changes in tracked files", runDiff},
-		{"commit", "-m <message>", "Commit staged changes", runCommit},
+		{"commit", "[-m <message>]", "Commit staged changes; without -m, write the message in your editor", runCommit},
 		{"checkout", "[--force]", "Restore tracked files from the last commit", runCheckout},
 		{"config", "<user.name|user.email|local.class> [value]", "Read or set the commit identity or machine class", runConfig},
 		{"remote", "add <name> <url> | list", "Manage remotes", runRemote},

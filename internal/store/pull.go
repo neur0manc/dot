@@ -39,7 +39,7 @@ func (s *Store) Pull(
 		return false, errors.New("remote name must not be empty")
 	}
 
-	staged, err := s.hasStagedChanges()
+	staged, err := s.HasStagedChanges()
 	if err != nil {
 		return false, err
 	}
