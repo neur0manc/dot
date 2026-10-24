@@ -92,6 +92,15 @@ the first command you run after upgrading moves them back.
 think twice before tracking secrets such as private ssh keys: `dot push`
 sends them to the remote.
 
+### a readme for the repository
+
+the `README.md` at the root of the repository, which GitHub shows on the
+repository's page, lives at `~/.local/dot/README.md` on disk instead of in
+your home directory. edit it there and track it like any other file:
+
+    dot add ~/.local/dot/README.md
+    dot commit -m "describe my dotfiles"
+
 ssh remotes authenticate like `ssh` does: keys of the running ssh-agent
 first, then `IdentityFile` entries from `~/.ssh/config` and the default
 key files in `~/.ssh`. encrypted key files ask for their passphrase on the

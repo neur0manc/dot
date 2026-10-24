@@ -119,6 +119,14 @@ func (f Facts) Condition(key string, value string) (string, error) {
 	return condition, nil
 }
 
+// The README.md at the root of the repository, which GitHub shows on the
+// repository's page, is kept at ReadmePath rather than in the home
+// directory itself.
+const (
+	readmeName = "README.md"
+	ReadmePath = ".local/dot/README.md"
+)
+
 // SplitName splits the name of a tracked file into the path it has on disk
 // and its conditions, which are nil for a plain file.
 func SplitName(name string) (string, []string) {
@@ -126,20 +134,33 @@ func SplitName(name string) (string, []string) {
 
 	base, conditions, found := strings.Cut(file, variantSeparator)
 	if !found || base == "" || conditions == "" {
-		return name, nil
+		return diskPath(name), nil
 	}
 
-	return directory + base, strings.Split(conditions, ",")
+	return diskPath(directory + base), strings.Split(conditions, ",")
 }
 
 // VariantName returns the name under which the variant of filePath for the
 // given conditions is tracked.
 func VariantName(filePath string, conditions []string) string {
+	if filePath == ReadmePath {
+		filePath = readmeName
+	}
+
 	if len(conditions) == 0 {
 		return filePath
 	}
 
 	return filePath + variantSeparator + strings.Join(conditions, ",")
+}
+
+// diskPath returns the path on disk of a tracked file without conditions.
+func diskPath(name string) string {
+	if name == readmeName {
+		return ReadmePath
+	}
+
+	return name
 }
 
 // Describe formats a tracked name for people: ".zshrc (os.darwin)".

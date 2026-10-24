@@ -177,7 +177,7 @@ func (s *Store) add(conditions []string, arguments []string) ([]AddedFile, error
 			return nil, err
 		}
 
-		result := AddedFile{Name: filePath}
+		result := AddedFile{Name: VariantName(filePath, nil)}
 
 		switch {
 		case conditions != nil:
@@ -186,9 +186,9 @@ func (s *Store) add(conditions []string, arguments []string) ([]AddedFile, error
 			_, fitsHere := s.facts.score(conditions)
 			variants := variantsOf(files, filePath)
 
-			if fitsHere && len(variants) == 1 && variants[0] == filePath {
-				idx.Remove(filePath)
-				result.Replaces = filePath
+			if plain := VariantName(filePath, nil); fitsHere && len(variants) == 1 && variants[0] == plain {
+				idx.Remove(plain)
+				result.Replaces = plain
 			}
 		case shown[filePath].name != "":
 			result.Name = shown[filePath].name

@@ -363,3 +363,37 @@ func TestUpgradeLinkedVariants(t *testing.T) {
 		t.Fatalf("second upgrade: %q %v", notes, err)
 	}
 }
+
+func TestReadmeLivesUnderLocalDot(t *testing.T) {
+	a := newMachine(t)
+	source := a.init(t)
+
+	a.write(t, ReadmePath, "# Notes\n")
+	added, err := source.Add("~/" + ReadmePath)
+	if err != nil || added[0].Name != "README.md" {
+		t.Fatalf("add: %+v %v", added, err)
+	}
+
+	expectStatus(t, source, "A  README.md")
+	mustCommit(t, source, "readme")
+
+	b := newMachine(t)
+	clone, result, err := Clone(b.gitDir, b.home, createRemote(t, source), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(result.Written, ",") != ReadmePath || b.exists("README.md") {
+		t.Fatalf("clone wrote %v", result.Written)
+	}
+	expectStatus(t, clone)
+
+	b.write(t, ReadmePath, "# Notes, edited\n")
+	expectStatus(t, clone, " M README.md")
+
+	// A variant replaces the plain README.md.
+	condition := "hostname." + strings.ToLower(clone.facts.Hostname)
+	added, err = clone.AddVariant([]string{condition}, "~/"+ReadmePath)
+	if err != nil || added[0].Name != "README.md##"+condition || added[0].Replaces != "README.md" {
+		t.Fatalf("add variant: %+v %v", added, err)
+	}
+}
