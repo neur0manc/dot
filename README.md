@@ -101,6 +101,18 @@ your home directory. edit it there and track it like any other file:
     dot add ~/.local/dot/README.md
     dot commit -m "describe my dotfiles"
 
+### shell completion
+
+add one line to your shell's configuration, which then travels with your
+dotfiles:
+
+    source <(dot completion zsh)     # ~/.zshrc, after compinit
+    source <(dot completion bash)    # ~/.bashrc
+    dot completion fish | source     # ~/.config/fish/config.fish
+
+it completes commands, flags and their values (`--os=li` → `--os=linux`),
+tracked files for `rm` and `ls`, and remotes for `push` and `pull`.
+
 ssh remotes authenticate like `ssh` does: keys of the running ssh-agent
 first, then `IdentityFile` entries from `~/.ssh/config` and the default
 key files in `~/.ssh`. encrypted key files ask for their passphrase on the

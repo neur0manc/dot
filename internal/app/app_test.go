@@ -333,3 +333,51 @@ func TestCommitWithEditor(t *testing.T) {
 		t.Fatalf("commit = %q", got)
 	}
 }
+
+func TestCompletion(t *testing.T) {
+	home := setup(t)
+
+	complete := func(args ...string) string {
+		t.Helper()
+
+		code, stdout, stderr := run(t, append([]string{"__complete"}, args...)...)
+		if code != 0 || stderr != "" {
+			t.Fatalf("%v: code=%d stderr=%q", args, code, stderr)
+		}
+
+		return strings.ReplaceAll(stdout, "\n", " ")
+	}
+
+	for _, shell := range []string{"bash", "zsh", "fish"} {
+		if code, stdout, _ := run(t, "completion", shell); code != 0 || !strings.Contains(stdout, "dot __complete") {
+			t.Errorf("completion %s: code=%d", shell, code)
+		}
+	}
+
+	if code, _, _ := run(t, "init"); code != 0 {
+		t.Fatal("init failed")
+	}
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := run(t, "add", "~/.zshrc"); code != 0 {
+		t.Fatal("add failed")
+	}
+
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"s"}, "s status "},
+		{[]string{"add", "--o"}, "--os --os= "},
+		{[]string{"add", "--os=li"}, "--os=linux "},
+		{[]string{"add", ".z"}, ":files "},
+		{[]string{"rm", "~/."}, "~/.zshrc "},
+		{[]string{"remote", ""}, "add list "},
+		{[]string{"status", ""}, ""},
+	} {
+		if got := complete(test.args...); got != test.want {
+			t.Errorf("%q: got %q, want %q", test.args, got, test.want)
+		}
+	}
+}
