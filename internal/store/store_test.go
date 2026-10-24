@@ -366,7 +366,13 @@ func createRemote(t *testing.T, s *Store) string {
 		t.Fatal(err)
 	}
 
-	url := "file://" + filepath.ToSlash(remotePath)
+	// file:///D:/x on Windows; "file://D:/x" would make D: the host.
+	urlPath := filepath.ToSlash(remotePath)
+	if !strings.HasPrefix(urlPath, "/") {
+		urlPath = "/" + urlPath
+	}
+
+	url := "file://" + urlPath
 
 	if err := s.AddRemote("origin", url); err != nil {
 		t.Fatal(err)
