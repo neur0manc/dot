@@ -125,6 +125,7 @@ func commands() []command {
 		{"pull", "[--force] [remote]", "Fast-forward from a remote and update tracked files", runPull},
 		{"repo-path", "", "Show the Git directory", runRepoPath},
 		{"platform", "", "Show what variants are matched against", runPlatform},
+		{"completion", "<bash|zsh|fish>", "Print a shell completion script", runCompletion},
 		{"version", "", "Show version information", runVersion},
 		{"help", "", "Show this help", runHelp},
 	}
@@ -146,6 +147,11 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, build BuildInfo) int
 		name = "help"
 	case "--version":
 		name = "version"
+	}
+
+	if name == "__complete" {
+		runComplete(c, args[1:])
+		return 0
 	}
 
 	if command, ok := aliases[name]; ok {

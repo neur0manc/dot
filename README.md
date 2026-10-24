@@ -108,6 +108,18 @@ or 0700 if executable), and dot creates those directories as 0700. checkout,
 pull and clone also tighten such files that are readable by others, as dot
 0.4 left them. elsewhere, a file dot overwrites keeps the permissions it has.
 
+### shell completion
+
+add one line to your shell's configuration, which then travels with your
+dotfiles:
+
+    source <(dot completion zsh)     # ~/.zshrc, after compinit
+    source <(dot completion bash)    # ~/.bashrc
+    dot completion fish | source     # ~/.config/fish/config.fish
+
+it completes commands, flags and their values (`--os=li` → `--os=linux`),
+tracked files for `rm` and `ls`, and remotes for `push` and `pull`.
+
 ssh remotes authenticate like `ssh` does: keys of the running ssh-agent
 first, then `IdentityFile` entries from `~/.ssh/config` and the default
 key files in `~/.ssh`. encrypted key files ask for their passphrase on the
