@@ -18,7 +18,7 @@ import (
 
 // passphraseEnvironmentVariable supplies the passphrase of encrypted private
 // key files when no terminal is available for a prompt.
-const passphraseEnvironmentVariable = "DOTMGR_SSH_PASSPHRASE"
+const passphraseEnvironmentVariable = "DOT_SSH_PASSPHRASE"
 
 // defaultIdentityFiles are tried after the files named in ~/.ssh/config,
 // in the order OpenSSH uses.
@@ -88,7 +88,7 @@ func newSSHAuth(user string, host string) (*sshAuth, error) {
 	}, nil
 }
 
-func (a *sshAuth) Name() string { return "dotmgr-ssh" }
+func (a *sshAuth) Name() string { return "dot-ssh" }
 
 func (a *sshAuth) String() string {
 	return fmt.Sprintf("user: %s, name: %s", a.user, a.Name())

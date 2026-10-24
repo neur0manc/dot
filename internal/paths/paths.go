@@ -1,4 +1,4 @@
-// Package paths finds the directories dotmgr works with.
+// Package paths finds the directories dot works with.
 package paths
 
 import (
@@ -9,13 +9,13 @@ import (
 )
 
 const (
-	homeEnvironmentVariable       = "DOTMGR_HOME"
-	repositoryEnvironmentVariable = "DOTMGR_REPO"
+	homeEnvironmentVariable       = "DOT_HOME"
+	repositoryEnvironmentVariable = "DOT_REPO"
 )
 
-// Home returns the directory that acts as dotmgr's working tree.
+// Home returns the directory that acts as dot's working tree.
 //
-// The DOTMGR_HOME environment variable overrides the user's home directory.
+// The DOT_HOME environment variable overrides the user's home directory.
 // This is mainly useful for testing.
 func Home() (string, error) {
 	if configured := os.Getenv(homeEnvironmentVariable); configured != "" {
@@ -30,11 +30,11 @@ func Home() (string, error) {
 	return filepath.Clean(home), nil
 }
 
-// Repository returns the directory containing dotmgr's Git directory.
+// Repository returns the directory containing dot's Git directory.
 //
 // The repository is kept outside of the working tree, so tracked files in the
 // home directory never interact with a stray .git directory. The
-// DOTMGR_REPO environment variable overrides the default location.
+// DOT_REPO environment variable overrides the default location.
 func Repository() (string, error) {
 	if configured := os.Getenv(repositoryEnvironmentVariable); configured != "" {
 		return absolute(repositoryEnvironmentVariable, configured)
@@ -45,7 +45,21 @@ func Repository() (string, error) {
 		return "", err
 	}
 
-	return filepath.Join(dataDirectory, "dotmgr", "repo.git"), nil
+	repository := filepath.Join(dataDirectory, "dot", "repo.git")
+
+	// Until 0.4 the project was called dotmgr. Keep using a repository in
+	// the old place unless one exists in the new one.
+	legacy := filepath.Join(dataDirectory, "dotmgr", "repo.git")
+	if !exists(repository) && exists(legacy) {
+		return legacy, nil
+	}
+
+	return repository, nil
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func dataDirectory() (string, error) {

@@ -6,6 +6,13 @@ import (
 	"github.com/go-git/go-git/v5/config"
 )
 
+// The repository configuration section holding the machine's class, and the
+// one dotmgr, as the project was called until 0.4, used.
+const (
+	configSection       = "dot"
+	legacyConfigSection = "dotmgr"
+)
+
 // SetConfig writes the repository-local commit identity or machine class.
 func (s *Store) SetConfig(key string, value string) error {
 	if value == "" {
@@ -23,7 +30,8 @@ func (s *Store) SetConfig(key string, value string) error {
 	case "user.email":
 		configuration.User.Email = value
 	case ClassConfigKey:
-		configuration.Raw.Section("dotmgr").SetOption("class", value)
+		configuration.Raw.Section(configSection).SetOption("class", value)
+		configuration.Raw.RemoveSection(legacyConfigSection)
 		s.facts.Class = value
 	default:
 		return fmt.Errorf("unsupported configuration key %q", key)
@@ -63,5 +71,9 @@ func (s *Store) class() (string, error) {
 		return "", fmt.Errorf("read repository configuration: %w", err)
 	}
 
-	return configuration.Raw.Section("dotmgr").Option("class"), nil
+	if class := configuration.Raw.Section(configSection).Option("class"); class != "" {
+		return class, nil
+	}
+
+	return configuration.Raw.Section(legacyConfigSection).Option("class"), nil
 }

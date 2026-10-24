@@ -1,15 +1,15 @@
-# Install dotmgr on Windows.
+# Install dot on Windows.
 #
-#   irm https://git.sr.ht/~stephan/dotmgr/blob/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/neur0manc/dot/main/install.ps1 | iex
 #
 # Environment:
-#   DOTMGR_VERSION      release tag to install (default: the latest release)
-#   DOTMGR_INSTALL_DIR  target directory (default: %LOCALAPPDATA%\Programs\dotmgr)
-#   DOTMGR_BASE_URL     where release files are served (for mirrors and tests)
+#   DOT_VERSION      release tag to install (default: the latest release)
+#   DOT_INSTALL_DIR  target directory (default: %LOCALAPPDATA%\Programs\dot)
+#   DOT_BASE_URL     where release files are served (for mirrors and tests)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$repo = 'https://git.sr.ht/~stephan/dotmgr'
+$releases = 'https://github.com/neur0manc/dot/releases'
 
 $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
     'AMD64' { 'amd64' }
@@ -17,17 +17,15 @@ $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
     default { throw "unsupported architecture $($env:PROCESSOR_ARCHITECTURE)" }
 }
 
-$version = $env:DOTMGR_VERSION
-if (-not $version) {
-    $version = (Invoke-RestMethod "$repo/blob/main/RELEASE").Trim()
-}
+$version = if ($env:DOT_VERSION) { $env:DOT_VERSION } else { 'latest' }
+$base = if ($env:DOT_BASE_URL) { $env:DOT_BASE_URL }
+        elseif ($version -eq 'latest') { "$releases/latest/download" }
+        else { "$releases/download/$version" }
+$name = "dot-windows-$arch.zip"
 
-$base = if ($env:DOTMGR_BASE_URL) { $env:DOTMGR_BASE_URL } else { "$repo/refs/download/$version" }
-$name = "dotmgr-windows-$arch.zip"
+Write-Host "Installing dot $version (windows/$arch)"
 
-Write-Host "Installing dotmgr $version (windows/$arch)"
-
-$tmp = Join-Path ([IO.Path]::GetTempPath()) "dotmgr-install-$([guid]::NewGuid())"
+$tmp = Join-Path ([IO.Path]::GetTempPath()) "dot-install-$([guid]::NewGuid())"
 New-Item -ItemType Directory -Path $tmp | Out-Null
 
 try {
@@ -42,12 +40,12 @@ try {
     $actual = (Get-FileHash $binary -Algorithm SHA256).Hash
     if ($actual -ne $expected.ToUpper()) { throw "checksum mismatch for $name" }
 
-    $dir = if ($env:DOTMGR_INSTALL_DIR) { $env:DOTMGR_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\dotmgr' }
+    $dir = if ($env:DOT_INSTALL_DIR) { $env:DOT_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\dot' }
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     Expand-Archive -Path $binary -DestinationPath $tmp -Force
-    Move-Item -Force (Join-Path $tmp 'dotmgr.exe') (Join-Path $dir 'dotmgr.exe')
+    Move-Item -Force (Join-Path $tmp 'dot.exe') (Join-Path $dir 'dot.exe')
 
-    Write-Host "Installed $(Join-Path $dir 'dotmgr.exe')"
+    Write-Host "Installed $(Join-Path $dir 'dot.exe')"
 
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if (($userPath -split ';') -notcontains $dir) {

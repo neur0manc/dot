@@ -36,14 +36,14 @@ func (s *Store) Commit(message string) (plumbing.Hash, error) {
 	if configuration.User.Name == "" {
 		return plumbing.ZeroHash, errors.New(
 			"user.name is not configured; run " +
-				"`dotmgr config user.name \"Your Name\"`",
+				"`dot config user.name \"Your Name\"`",
 		)
 	}
 
 	if configuration.User.Email == "" {
 		return plumbing.ZeroHash, errors.New(
 			"user.email is not configured; run " +
-				"`dotmgr config user.email \"you@example.com\"`",
+				"`dot config user.email \"you@example.com\"`",
 		)
 	}
 

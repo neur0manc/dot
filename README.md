@@ -1,4 +1,4 @@
-# dotmgr
+# dot
 
 config management akin to yadm. no-dependency, single, static binary
 for linux, windows and macos.
@@ -7,49 +7,49 @@ for linux, windows and macos.
 
 linux / macos:
 
-    curl -fsSL https://git.sr.ht/~stephan/dotmgr/blob/main/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/neur0manc/dot/main/install.sh | sh
 
 windows (powershell):
 
-    irm https://git.sr.ht/~stephan/dotmgr/blob/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/neur0manc/dot/main/install.ps1 | iex
 
 the installers download the archive of the latest release for your platform,
 verify it against the release's `SHA256SUMS`, and put it into
-`~/.local/bin` (`%LOCALAPPDATA%\Programs\dotmgr` on windows, which is also
-added to your user PATH). pick a version with `DOTMGR_VERSION=v0.2.0` and a
-directory with `DOTMGR_INSTALL_DIR`. you can also download the archives and
-`SHA256SUMS` by hand from
-`https://git.sr.ht/~stephan/dotmgr/refs/download/<tag>/`, or build from
-source with `go install git.sr.ht/~stephan/dotmgr/cmd/dotmgr@latest`.
+`~/.local/bin` (`%LOCALAPPDATA%\Programs\dot` on windows, which is also
+added to your user PATH). pick a version with `DOT_VERSION=v0.4.0` and a
+directory with `DOT_INSTALL_DIR`. you can also download the archives from
+the [releases page](https://github.com/neur0manc/dot/releases), or build
+from source with `go install github.com/neur0manc/dot/cmd/dot@latest`.
 
 ## releasing
 
-    scripts/release.sh v0.2.0
-    git push origin HEAD v0.2.0
+    scripts/release.sh v0.4.0
+    git push origin HEAD v0.4.0
 
-`release.sh` runs the tests, records the tag in `RELEASE` (which the
-installers read to find the latest release) and creates the tag. the build
-on builds.sr.ht (`.build.yml`) then cross-compiles all platforms and, for
-tagged commits, also attaches the archives to the tag on git.sr.ht, where
-they do not expire like build artifacts do. the upload needs a git.sr.ht
-token stored as a builds.sr.ht secret, see the comment in `.build.yml`.
+`release.sh` runs the tests and creates the tag. pushing it starts the
+release workflow on github actions, which cross-compiles all platforms with
+`scripts/build.sh` and publishes the archives and `SHA256SUMS` as a github
+release. every push and pull request runs the tests on linux, macos and
+windows.
 
 ## usage
 
-dotmgr works like yadm: your home directory is the working tree, the files
+dot works like yadm: your home directory is the working tree, the files
 stay where they are, and only files you explicitly add are tracked. The git
-directory lives outside of it (`~/.local/share/dotmgr/repo.git`, or
-`%LOCALAPPDATA%\dotmgr\repo.git` on windows).
+directory lives outside of it (`~/.local/share/dot/repo.git`, or
+`%LOCALAPPDATA%\dot\repo.git` on windows). the project used to be called
+dotmgr: a repository in `~/.local/share/dotmgr` is still found, and the
+environment variables are now called `DOT_…` instead of `DOTMGR_…`.
 
-    dotmgr init                      # or: dotmgr clone <url>
-    dotmgr add ~/.vimrc ~/.config/foo
-    dotmgr status                    # staged / modified tracked files
-    dotmgr diff
-    dotmgr commit -m "add vim config"
-    dotmgr remote add origin <url>
-    dotmgr push
+    dot init                      # or: dot clone <url>
+    dot add ~/.vimrc ~/.config/foo
+    dot status                    # staged / modified tracked files
+    dot diff
+    dot commit -m "add vim config"
+    dot remote add origin <url>
+    dot push
 
-on another machine `dotmgr clone <url>` checks the files out into `$HOME`.
+on another machine `dot clone <url>` checks the files out into `$HOME`.
 files that already exist with different content are never overwritten
 unless you pass `--force` (also for `pull` and `checkout`).
 
@@ -58,10 +58,10 @@ unless you pass `--force` (also for `pull` and `checkout`).
 a tracked file can have variants for different machines. say which machines
 a file is for when you add it:
 
-    dotmgr add ~/.zshrc --os                # only on this os (darwin, ...)
-    dotmgr add ~/.zshrc --os=linux          # the version for linux machines
-    dotmgr add ~/.ssh/config --host         # only on this host
-    dotmgr add ~/.gitconfig --class=work    # machines of class "work"
+    dot add ~/.zshrc --os                # only on this os (darwin, ...)
+    dot add ~/.zshrc --os=linux          # the version for linux machines
+    dot add ~/.ssh/config --host         # only on this host
+    dot add ~/.gitconfig --class=work    # machines of class "work"
 
 only the variant that fits the machine best is put on disk, under the
 file's real name; the others stay in the repository. a plainly added file is
@@ -71,7 +71,7 @@ value mean this machine; values need `=`. several conditions must all match.
 - `--os[=…]`: linux, darwin (or macos), windows, freebsd, …; `unix` is
   every system but windows
 - `--host[=…]`: the host name without domain
-- `--class[=…]`: set a machine's class with `dotmgr config local.class work`;
+- `--class[=…]`: set a machine's class with `dot config local.class work`;
   changing it switches files to the variants that fit now
 - `--arch[=…]`: amd64, arm64, …
 
@@ -79,26 +79,26 @@ when several variants fit, the most specific wins: host > os > unix >
 class > arch > plain file. adding a variant for this machine to a file that
 was tracked plainly limits the file to such machines; a variant for other
 machines (say `--os=linux` on a mac) is stored next to it and leaves the
-file on disk alone. once a file has variants, `dotmgr add ~/.zshrc` updates
-the one in use, and `dotmgr rm ~/.zshrc` untracks it (`dotmgr rm ~/.zshrc
---os=linux` names another). `dotmgr list` shows all variants.
+file on disk alone. once a file has variants, `dot add ~/.zshrc` updates
+the one in use, and `dot rm ~/.zshrc` untracks it (`dot rm ~/.zshrc
+--os=linux` names another). `dot list` shows all variants.
 
 in the repository a variant is stored as `<file>##<condition>,…`, the way
 yadm names them (`.zshrc##os.darwin`), so the repository stays readable
 with plain git. dotmgr 0.3 kept those `##` files on disk and linked to them;
 the first command you run after upgrading moves them back.
 
-think twice before tracking secrets such as private ssh keys: `dotmgr push`
+think twice before tracking secrets such as private ssh keys: `dot push`
 sends them to the remote.
 
 ssh remotes authenticate like `ssh` does: keys of the running ssh-agent
 first, then `IdentityFile` entries from `~/.ssh/config` and the default
 key files in `~/.ssh`. encrypted key files ask for their passphrase on the
-terminal (or read `DOTMGR_SSH_PASSPHRASE`); host keys are checked against
-`~/.ssh/known_hosts`. https remotes use `DOTMGR_HTTPS_USERNAME` and
-`DOTMGR_HTTPS_PASSWORD`.
+terminal (or read `DOT_SSH_PASSPHRASE`); host keys are checked against
+`~/.ssh/known_hosts`. https remotes use `DOT_HTTPS_USERNAME` and
+`DOT_HTTPS_PASSWORD`.
 
-`dotmgr help` lists all commands. `DOTMGR_HOME` and `DOTMGR_REPO` override
+`dot help` lists all commands. `DOT_HOME` and `DOT_REPO` override
 the working tree and git directory locations.
 
 ## banter

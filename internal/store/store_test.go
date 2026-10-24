@@ -246,10 +246,10 @@ func TestAddRejectsOutsideHomeAndRepository(t *testing.T) {
 
 func TestAddSkipsRepositoryInsideHome(t *testing.T) {
 	m := newMachine(t)
-	m.gitDir = filepath.Join(m.home, ".local", "share", "dotmgr", "repo.git")
+	m.gitDir = filepath.Join(m.home, ".local", "share", "dot", "repo.git")
 	s := m.init(t)
 
-	m.write(t, ".local/share/dotmgr/other", "x\n")
+	m.write(t, ".local/share/dot/other", "x\n")
 	m.write(t, ".local/share/keep", "k\n")
 
 	added, err := s.Add("~/.local")
@@ -258,7 +258,7 @@ func TestAddSkipsRepositoryInsideHome(t *testing.T) {
 	}
 
 	got := strings.Join(addedNames(added), ",")
-	if got != ".local/share/dotmgr/other,.local/share/keep" {
+	if got != ".local/share/dot/other,.local/share/keep" {
 		t.Fatalf("added %s", got)
 	}
 

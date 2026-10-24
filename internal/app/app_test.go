@@ -32,8 +32,8 @@ func setup(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("DOTMGR_HOME", home)
-	t.Setenv("DOTMGR_REPO", filepath.Join(root, "repo.git"))
+	t.Setenv("DOT_HOME", home)
+	t.Setenv("DOT_REPO", filepath.Join(root, "repo.git"))
 
 	return home
 }
@@ -79,7 +79,7 @@ func TestUsageErrors(t *testing.T) {
 	} {
 		code, _, stderr := run(t, args...)
 
-		if code != 2 || !strings.Contains(stderr, "usage: dotmgr") {
+		if code != 2 || !strings.Contains(stderr, "usage: dot") {
 			t.Errorf("%v: code=%d stderr=%q", args, code, stderr)
 		}
 	}
@@ -90,7 +90,7 @@ func TestCommandsNeedRepository(t *testing.T) {
 
 	code, _, stderr := run(t, "status")
 
-	if code != 1 || !strings.Contains(stderr, "dotmgr init") {
+	if code != 1 || !strings.Contains(stderr, "dot init") {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}
 }

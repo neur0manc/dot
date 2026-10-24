@@ -22,9 +22,9 @@ import (
 const DefaultBranch = "main"
 
 var (
-	// ErrNotInitialized means no dotmgr repository exists yet.
+	// ErrNotInitialized means no repository exists yet.
 	ErrNotInitialized = errors.New(
-		"no dotmgr repository found; run `dotmgr init` or `dotmgr clone <url>`",
+		"no repository found; run `dot init` or `dot clone <url>`",
 	)
 
 	// ErrAlreadyExists means a repository is already present.

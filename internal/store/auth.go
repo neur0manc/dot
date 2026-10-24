@@ -11,7 +11,7 @@ import (
 )
 
 // authenticationForURL picks how to log in to a remote: like ssh for SSH
-// URLs, and with DOTMGR_HTTPS_USERNAME and DOTMGR_HTTPS_PASSWORD for HTTPS.
+// URLs, and with DOT_HTTPS_USERNAME and DOT_HTTPS_PASSWORD for HTTPS.
 func authenticationForURL(remoteURL string) (transport.AuthMethod, error) {
 	endpoint, err := transport.NewEndpoint(remoteURL)
 	if err != nil {
@@ -26,8 +26,8 @@ func authenticationForURL(remoteURL string) (transport.AuthMethod, error) {
 		return httpsAuthentication()
 
 	case "http":
-		if os.Getenv("DOTMGR_HTTPS_USERNAME") != "" ||
-			os.Getenv("DOTMGR_HTTPS_PASSWORD") != "" {
+		if os.Getenv("DOT_HTTPS_USERNAME") != "" ||
+			os.Getenv("DOT_HTTPS_PASSWORD") != "" {
 			return nil, errors.New("refusing to send credentials over insecure HTTP")
 		}
 
@@ -42,8 +42,8 @@ func authenticationForURL(remoteURL string) (transport.AuthMethod, error) {
 }
 
 func httpsAuthentication() (transport.AuthMethod, error) {
-	username := os.Getenv("DOTMGR_HTTPS_USERNAME")
-	password := os.Getenv("DOTMGR_HTTPS_PASSWORD")
+	username := os.Getenv("DOT_HTTPS_USERNAME")
+	password := os.Getenv("DOT_HTTPS_PASSWORD")
 
 	if username == "" && password == "" {
 		// Public HTTPS repositories need no authentication.
@@ -51,11 +51,11 @@ func httpsAuthentication() (transport.AuthMethod, error) {
 	}
 
 	if username == "" {
-		return nil, errors.New("DOTMGR_HTTPS_USERNAME is required when DOTMGR_HTTPS_PASSWORD is set")
+		return nil, errors.New("DOT_HTTPS_USERNAME is required when DOT_HTTPS_PASSWORD is set")
 	}
 
 	if password == "" {
-		return nil, errors.New("DOTMGR_HTTPS_PASSWORD is required when DOTMGR_HTTPS_USERNAME is set")
+		return nil, errors.New("DOT_HTTPS_PASSWORD is required when DOT_HTTPS_USERNAME is set")
 	}
 
 	return &githttp.BasicAuth{Username: username, Password: password}, nil

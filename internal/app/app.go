@@ -1,4 +1,4 @@
-// Package app implements dotmgr's command-line interface.
+// Package app implements dot's command-line interface.
 package app
 
 import (
@@ -8,8 +8,8 @@ import (
 	"io"
 	"strings"
 
-	"git.sr.ht/~stephan/dotmgr/internal/paths"
-	"git.sr.ht/~stephan/dotmgr/internal/store"
+	"github.com/neur0manc/dot/internal/paths"
+	"github.com/neur0manc/dot/internal/store"
 )
 
 // BuildInfo describes the running binary.
@@ -153,7 +153,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, build BuildInfo) int
 			return 0
 		case errors.As(err, &usage):
 			fmt.Fprintf(stderr, "error: %v\n", usage)
-			fmt.Fprintf(stderr, "usage: dotmgr %s %s\n", candidate.name, candidate.args)
+			fmt.Fprintf(stderr, "usage: dot %s %s\n", candidate.name, candidate.args)
 			return 2
 		default:
 			fmt.Fprintf(stderr, "error: %v\n", err)
@@ -168,12 +168,12 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, build BuildInfo) int
 }
 
 func printUsage(output io.Writer) {
-	fmt.Fprintln(output, `dotmgr manages configuration files in your home directory with Git.
+	fmt.Fprintln(output, `dot manages configuration files in your home directory with Git.
 
 Tracked files stay where they are; the repository lives elsewhere.
 
 Usage:
-  dotmgr <command> [arguments]
+  dot <command> [arguments]
 
 Commands:`)
 
@@ -192,13 +192,13 @@ machine; several must all match:
   --os[=<os>]         linux, darwin (or macos), windows, ...; unix is
                       every system except Windows
   --host[=<name>]     a host name, without domain
-  --class[=<class>]   a class of machines, set with dotmgr config local.class
+  --class[=<class>]   a class of machines, set with dot config local.class
   --arch[=<arch>]     amd64, arm64, ...
 Only the variant that fits best is put on disk, under the file's own name.
 
 Environment:
-  DOTMGR_HOME   working tree (default: your home directory)
-  DOTMGR_REPO   Git directory (default: user data directory)
-  DOTMGR_HTTPS_USERNAME, DOTMGR_HTTPS_PASSWORD
+  DOT_HOME   working tree (default: your home directory)
+  DOT_REPO   Git directory (default: user data directory)
+  DOT_HTTPS_USERNAME, DOT_HTTPS_PASSWORD
                 HTTPS credentials for push, pull and clone`)
 }

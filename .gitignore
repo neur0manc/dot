@@ -4,4 +4,4 @@
 .DS_Store
 /dist/
 /build/
-/dist//tmp
+/tmp/

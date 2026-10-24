@@ -1,4 +1,4 @@
-module git.sr.ht/~stephan/dotmgr
+module github.com/neur0manc/dot
 
 go 1.26.0
 

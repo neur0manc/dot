@@ -1,7 +1,7 @@
 #!/bin/sh
-# Record and tag a release; the build on builds.sr.ht publishes the binaries.
+# Tag a release; pushing the tag makes GitHub Actions build and publish it.
 #
-#   scripts/release.sh v0.2.0
+#   scripts/release.sh v0.4.0
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -20,10 +20,6 @@ fi
 
 go test ./...
 
-# install.sh and install.ps1 read this file to find the latest release.
-echo "$tag" >RELEASE
-git add RELEASE
-git commit -m "Release $tag"
-git tag -a "$tag" -m "dotmgr $tag"
+git tag -a "$tag" -m "dot $tag"
 
 echo "Now push: git push origin HEAD $tag"

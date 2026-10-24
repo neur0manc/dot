@@ -21,7 +21,7 @@ import (
 //	os.<os>          linux, darwin (or macos), windows, freebsd, ...
 //	                 and unix for every system except Windows
 //	arch.<arch>      amd64, arm64, ...
-//	class.<class>    the value of `dotmgr config local.class`
+//	class.<class>    the value of `dot config local.class`
 //	hostname.<host>  the host name without domain
 //
 // Matching ignores case. All conditions of a variant must match; of the
@@ -102,7 +102,7 @@ func (f Facts) Condition(key string, value string) (string, error) {
 			value = f.Class
 			if value == "" {
 				return "", fmt.Errorf(
-					"this machine has no class; set one with `dotmgr config %s <class>`",
+					"this machine has no class; set one with `dot config %s <class>`",
 					ClassConfigKey,
 				)
 			}

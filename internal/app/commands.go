@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"git.sr.ht/~stephan/dotmgr/internal/store"
+	"github.com/neur0manc/dot/internal/store"
 )
 
 // newFlags returns an empty flag set for a command.
@@ -151,8 +151,8 @@ func runClone(c *cli, args []string) error {
 	if errors.As(err, &conflict) {
 		fmt.Fprintf(c.stdout, "Cloned %s into %s.\n", args[0], gitDir)
 		return fmt.Errorf(
-			"%w\nNo files were written; review them with `dotmgr diff`, "+
-				"then run `dotmgr checkout --force` to overwrite them",
+			"%w\nNo files were written; review them with `dot diff`, "+
+				"then run `dot checkout --force` to overwrite them",
 			err,
 		)
 	}
@@ -336,7 +336,7 @@ func runDiff(c *cli, args []string) error {
 	}
 
 	for _, diff := range diffs {
-		fmt.Fprintf(c.stdout, "diff --dotmgr %s\n", store.Describe(diff.Name))
+		fmt.Fprintf(c.stdout, "diff --dot %s\n", store.Describe(diff.Name))
 
 		if diff.Binary {
 			fmt.Fprintf(c.stdout, "Binary files differ: %s\n", diff.Path)
@@ -471,8 +471,8 @@ func runConfig(c *cli, args []string) error {
 
 	var conflict *store.ConflictError
 	if errors.As(err, &conflict) {
-		fmt.Fprintf(c.stderr, "warning: %v\nRun `dotmgr checkout` once they are committed, "+
-			"or `dotmgr checkout --force` to overwrite them\n", err)
+		fmt.Fprintf(c.stderr, "warning: %v\nRun `dot checkout` once they are committed, "+
+			"or `dot checkout --force` to overwrite them\n", err)
 		return nil
 	}
 
@@ -644,7 +644,7 @@ func runPlatform(c *cli, args []string) error {
 }
 
 func runVersion(c *cli, args []string) error {
-	fmt.Fprintf(c.stdout, "dotmgr %s\ncommit: %s\nbuilt: %s\n", c.build.Version, c.build.Commit, c.build.Date)
+	fmt.Fprintf(c.stdout, "dot %s\ncommit: %s\nbuilt: %s\n", c.build.Version, c.build.Commit, c.build.Date)
 	return nil
 }
 

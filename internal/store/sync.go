@@ -13,13 +13,13 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 
-	"git.sr.ht/~stephan/dotmgr/internal/atomicfile"
+	"github.com/neur0manc/dot/internal/atomicfile"
 )
 
 // ErrConflicts is wrapped by ConflictError.
 var ErrConflicts = errors.New("local files differ from the repository")
 
-// ConflictError lists files that dotmgr refused to overwrite or delete.
+// ConflictError lists files that dot refused to overwrite or delete.
 type ConflictError struct {
 	Paths []string
 }
@@ -37,7 +37,7 @@ type SyncResult struct {
 }
 
 // update makes the files on disk and the index follow target. current are
-// the files that dotmgr last put on disk, normally those of HEAD.
+// the files that dot last put on disk, normally those of HEAD.
 //
 // With restore, every file is checked, so deleted or modified files are put
 // back; without it only files that differ between current and target are

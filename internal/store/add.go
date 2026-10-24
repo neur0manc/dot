@@ -123,7 +123,7 @@ func (s *Store) add(conditions []string, arguments []string) ([]AddedFile, error
 		}
 
 		if _, inside := relativeTo(canonicalGitDir, full); inside || full == canonicalGitDir {
-			return nil, fmt.Errorf("cannot track %q because it is inside the dotmgr repository", argument)
+			return nil, fmt.Errorf("cannot track %q because it is inside the repository", argument)
 		}
 
 		collected, err := collectFiles(full, filePath, canonicalGitDir)

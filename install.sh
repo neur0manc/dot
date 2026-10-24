@@ -1,15 +1,15 @@
 #!/bin/sh
-# Install dotmgr on Linux or macOS.
+# Install dot on Linux or macOS.
 #
-#   curl -fsSL https://git.sr.ht/~stephan/dotmgr/blob/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/neur0manc/dot/main/install.sh | sh
 #
 # Environment:
-#   DOTMGR_VERSION     release tag to install (default: the latest release)
-#   DOTMGR_INSTALL_DIR target directory (default: ~/.local/bin)
-#   DOTMGR_BASE_URL    where release files are served (for mirrors and tests)
+#   DOT_VERSION     release tag to install (default: the latest release)
+#   DOT_INSTALL_DIR target directory (default: ~/.local/bin)
+#   DOT_BASE_URL    where release files are served (for mirrors and tests)
 set -eu
 
-repo=https://git.sr.ht/~stephan/dotmgr
+releases=https://github.com/neur0manc/dot/releases
 
 fail() {
 	echo "install: $*" >&2
@@ -41,16 +41,17 @@ esac
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-version=${DOTMGR_VERSION:-}
-if [ -z "$version" ]; then
-	download "$repo/blob/main/RELEASE" "$tmp/RELEASE" || fail "cannot determine the latest release"
-	version=$(tr -d ' \r\n' <"$tmp/RELEASE")
+version=${DOT_VERSION:-latest}
+if [ "$version" = latest ]; then
+	default_base=$releases/latest/download
+else
+	default_base=$releases/download/$version
 fi
 
-base=${DOTMGR_BASE_URL:-$repo/refs/download/$version}
-name=dotmgr-$os-$arch.tar.gz
+base=${DOT_BASE_URL:-$default_base}
+name=dot-$os-$arch.tar.gz
 
-echo "Installing dotmgr $version ($os/$arch)"
+echo "Installing dot $version ($os/$arch)"
 
 download "$base/$name" "$tmp/$name" || fail "cannot download $base/$name"
 download "$base/SHA256SUMS" "$tmp/SHA256SUMS" || fail "cannot download checksums"
@@ -66,14 +67,14 @@ fi
 
 [ "$actual" = "$expected" ] || fail "checksum mismatch for $name"
 
-dir=${DOTMGR_INSTALL_DIR:-$HOME/.local/bin}
+dir=${DOT_INSTALL_DIR:-$HOME/.local/bin}
 mkdir -p "$dir"
 command -v tar >/dev/null 2>&1 || fail "tar is required"
-tar -xzf "$tmp/$name" -C "$tmp" dotmgr
-chmod 755 "$tmp/dotmgr"
-mv "$tmp/dotmgr" "$dir/dotmgr"
+tar -xzf "$tmp/$name" -C "$tmp" dot
+chmod 755 "$tmp/dot"
+mv "$tmp/dot" "$dir/dot"
 
-echo "Installed $dir/dotmgr"
+echo "Installed $dir/dot"
 
 case ":$PATH:" in
 *":$dir:"*) ;;
