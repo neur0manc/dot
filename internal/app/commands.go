@@ -259,16 +259,12 @@ func runRemove(c *cli, args []string) error {
 }
 
 func runList(c *cli, args []string) error {
-	if len(args) != 0 {
-		return usageError{"list takes no arguments"}
-	}
-
 	s, err := c.open()
 	if err != nil {
 		return err
 	}
 
-	files, err := s.Tracked()
+	files, err := s.Tracked(args...)
 	if err != nil {
 		return err
 	}

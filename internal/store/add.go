@@ -17,6 +17,17 @@ import (
 // Symbolic links in the parent directories are resolved, but a final
 // symlink is kept, because symlinks are tracked as links.
 func (s *Store) resolve(argument string) (string, string, error) {
+	full, name, err := s.locate(argument)
+	if err == nil && name == "" {
+		return "", "", fmt.Errorf("%q is the home directory itself", argument)
+	}
+
+	return full, name, err
+}
+
+// locate is resolve, but also accepts the home directory itself, for which
+// it returns an empty name.
+func (s *Store) locate(argument string) (string, string, error) {
 	if argument == "" {
 		return "", "", errors.New("path must not be empty")
 	}
@@ -46,6 +57,10 @@ func (s *Store) resolve(argument string) (string, string, error) {
 	}
 
 	full := filepath.Join(parent, filepath.Base(absolute))
+
+	if full == canonicalHome {
+		return full, "", nil
+	}
 
 	name, ok := relativeTo(canonicalHome, full)
 	if !ok {
@@ -357,8 +372,25 @@ type TrackedFile struct {
 	Used bool   // whether this machine uses it
 }
 
-// Tracked lists all tracked files and variants, sorted by name.
-func (s *Store) Tracked() ([]TrackedFile, error) {
+// Tracked lists the tracked files and variants at or beneath the given
+// paths, or all of them without paths, sorted by name.
+func (s *Store) Tracked(arguments ...string) ([]TrackedFile, error) {
+	var prefixes []string
+
+	for _, argument := range arguments {
+		_, name, err := s.locate(argument)
+		if err != nil {
+			return nil, err
+		}
+
+		if name == "" { // the home directory: everything
+			prefixes = nil
+			break
+		}
+
+		prefixes = append(prefixes, name)
+	}
+
 	idx, err := s.loadIndex()
 	if err != nil {
 		return nil, err
@@ -371,6 +403,12 @@ func (s *Store) Tracked() ([]TrackedFile, error) {
 
 	for _, name := range slices.Sorted(maps.Keys(files)) {
 		filePath, _ := SplitName(name)
+		if len(prefixes) > 0 && !slices.ContainsFunc(prefixes, func(prefix string) bool {
+			return filePath == prefix || strings.HasPrefix(filePath, prefix+"/")
+		}) {
+			continue
+		}
+
 		tracked = append(tracked, TrackedFile{
 			Name: name,
 			Path: filePath,

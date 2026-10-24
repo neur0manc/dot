@@ -75,7 +75,8 @@ func TestUsageErrors(t *testing.T) {
 		{"clone"},
 		{"remote"},
 		{"remote", "add", "only-name"},
-		{"list", "extra"},
+		{"status", "extra"},
+		{"p", "one", "two"}, // alias of push
 	} {
 		code, _, stderr := run(t, args...)
 
@@ -152,9 +153,30 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("list = %q", got)
 	}
 
+	config := filepath.Join(home, ".config", "app")
+	if err := os.MkdirAll(config, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config, "conf"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must("add", "~/.config/app")
+
+	t.Chdir(filepath.Join(home, ".config"))
+
+	if got := must("ls", "."); got != ".config/app/conf\n" {
+		t.Fatalf("ls . = %q", got)
+	}
+	if got := must("list", "~"); got != ".config/app/conf\n.vimrc\n" {
+		t.Fatalf("list ~ = %q", got)
+	}
+	if got := must("s"); got != "A  .config/app/conf\n M .vimrc\n" {
+		t.Fatalf("s = %q", got)
+	}
+
 	must("rm", "~/.vimrc")
 
-	if got := must("status"); got != "D  .vimrc\n" {
+	if got := must("status"); got != "A  .config/app/conf\nD  .vimrc\n" {
 		t.Fatalf("status after rm = %q", got)
 	}
 }

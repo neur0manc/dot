@@ -44,6 +44,7 @@ environment variables are now called `DOT_…` instead of `DOTMGR_…`.
     dot init                      # or: dot clone <url>
     dot add ~/.vimrc ~/.config/foo
     dot status                    # staged / modified tracked files
+    dot ls .                      # tracked files here and below
     dot diff
     dot commit -m "add vim config"
     dot remote add origin <url>
@@ -98,7 +99,8 @@ terminal (or read `DOT_SSH_PASSPHRASE`); host keys are checked against
 `~/.ssh/known_hosts`. https remotes use `DOT_HTTPS_USERNAME` and
 `DOT_HTTPS_PASSWORD`.
 
-`dot help` lists all commands. `DOT_HOME` and `DOT_REPO` override
+`dot help` lists all commands; `ls`, `s` and `p` are short for `list`,
+`status` and `push`. `DOT_HOME` and `DOT_REPO` override
 the working tree and git directory locations.
 
 ## banter
