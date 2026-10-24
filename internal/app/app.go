@@ -93,6 +93,14 @@ func locations() (gitDir string, home string, err error) {
 	return gitDir, home, nil
 }
 
+// aliases are short names for commands.
+var aliases = map[string]string{
+	"ls": "list",
+	"s":  "status",
+	"p":  "push",
+	"d":  "diff",
+}
+
 type command struct {
 	name    string
 	args    string // argument synopsis shown in help
@@ -106,10 +114,10 @@ func commands() []command {
 		{"clone", "[--force] <url>", "Clone a repository and put its files into your home directory", runClone},
 		{"add", "[conditions] <path>...", "Track files, or all files in directories; conditions make them variants", runAdd},
 		{"rm", "[conditions] <path>...", "Stop tracking files; the files stay on disk", runRemove},
-		{"list", "", "List tracked files and variants", runList},
+		{"list", "[<path>...]", "List tracked files and variants, or those at or beneath paths", runList},
 		{"status", "", "Show staged and modified tracked files", runStatus},
 		{"diff", "[--staged]", "Show changes in tracked files", runDiff},
-		{"commit", "-m <message>", "Commit staged changes", runCommit},
+		{"commit", "[-m <message>]", "Commit staged changes; without -m, write the message in your editor", runCommit},
 		{"checkout", "[--force]", "Restore tracked files from the last commit", runCheckout},
 		{"config", "<user.name|user.email|local.class> [value]", "Read or set the commit identity or machine class", runConfig},
 		{"remote", "add <name> <url> | list", "Manage remotes", runRemote},
@@ -138,6 +146,10 @@ func Run(args []string, stdout io.Writer, stderr io.Writer, build BuildInfo) int
 		name = "help"
 	case "--version":
 		name = "version"
+	}
+
+	if command, ok := aliases[name]; ok {
+		name = command
 	}
 
 	for _, candidate := range commands() {
@@ -179,6 +191,11 @@ Commands:`)
 
 	for _, entry := range commands() {
 		synopsis := entry.name
+		for alias, command := range aliases {
+			if command == entry.name {
+				synopsis += ", " + alias
+			}
+		}
 		if entry.args != "" {
 			synopsis += " " + entry.args
 		}

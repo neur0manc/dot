@@ -47,7 +47,7 @@ func (s *Store) Commit(message string) (plumbing.Hash, error) {
 		)
 	}
 
-	staged, err := s.hasStagedChanges()
+	staged, err := s.HasStagedChanges()
 	if err != nil {
 		return plumbing.ZeroHash, err
 	}
@@ -78,9 +78,9 @@ func (s *Store) Commit(message string) (plumbing.Hash, error) {
 	return hash, nil
 }
 
-// hasStagedChanges reports whether the index differs from HEAD. Unlike
+// HasStagedChanges reports whether the index differs from HEAD. Unlike
 // Status it does not read the working tree.
-func (s *Store) hasStagedChanges() (bool, error) {
+func (s *Store) HasStagedChanges() (bool, error) {
 	idx, err := s.loadIndex()
 	if err != nil {
 		return false, err

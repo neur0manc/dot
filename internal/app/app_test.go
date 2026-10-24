@@ -70,12 +70,12 @@ func TestUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"add"},
 		{"rm"},
-		{"commit"},
-		{"commit", "-m", " "},
+		{"commit", "extra"},
 		{"clone"},
 		{"remote"},
 		{"remote", "add", "only-name"},
-		{"list", "extra"},
+		{"status", "extra"},
+		{"p", "one", "two"}, // alias of push
 	} {
 		code, _, stderr := run(t, args...)
 
@@ -152,9 +152,30 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("list = %q", got)
 	}
 
+	config := filepath.Join(home, ".config", "app")
+	if err := os.MkdirAll(config, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config, "conf"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must("add", "~/.config/app")
+
+	t.Chdir(filepath.Join(home, ".config"))
+
+	if got := must("ls", "."); got != ".config/app/conf\n" {
+		t.Fatalf("ls . = %q", got)
+	}
+	if got := must("list", "~"); got != ".config/app/conf\n.vimrc\n" {
+		t.Fatalf("list ~ = %q", got)
+	}
+	if got := must("s"); got != "A  .config/app/conf\n M .vimrc\n" {
+		t.Fatalf("s = %q", got)
+	}
+
 	must("rm", "~/.vimrc")
 
-	if got := must("status"); got != "D  .vimrc\n" {
+	if got := must("status"); got != "A  .config/app/conf\nD  .vimrc\n" {
 		t.Fatalf("status after rm = %q", got)
 	}
 }
@@ -249,5 +270,66 @@ func TestVariants(t *testing.T) {
 
 	if code, _, _ := run(t, "add", "--os=bogus/x", "~/.rc"); code != 1 {
 		t.Fatalf("bad condition should fail, code=%d", code)
+	}
+}
+
+func TestCommitWithEditor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the test editors are shell commands")
+	}
+
+	home := setup(t)
+
+	must := func(args ...string) string {
+		t.Helper()
+
+		code, stdout, stderr := run(t, args...)
+		if code != 0 {
+			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
+		}
+
+		return stdout
+	}
+
+	must("init")
+	must("config", "user.name", "Test")
+	must("config", "user.email", "test@example.com")
+
+	rc := filepath.Join(home, ".rc")
+	if err := os.WriteFile(rc, []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must("add", "~/.rc")
+
+	// core.editor in the global Git configuration wins over $EDITOR.
+	t.Setenv("GIT_EDITOR", "")
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "false")
+	gitconfig := "[core]\n\teditor = printf 'from gitconfig\\\\n\\\\nbody\\\\n' >>\n"
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(gitconfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := must("commit"); !strings.Contains(got, ": from gitconfig\n") {
+		t.Fatalf("commit = %q", got)
+	}
+
+	// $GIT_EDITOR wins over everything; a message of only comments aborts.
+	if err := os.WriteFile(rc, []byte("2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must("add", "~/.rc")
+
+	t.Setenv("GIT_EDITOR", "true")
+	if code, _, stderr := run(t, "commit"); code != 1 || !strings.Contains(stderr, "empty commit message") {
+		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+
+	t.Setenv("GIT_EDITOR", "printf 'from GIT_EDITOR' >")
+	if got := must("d", "--staged"); !strings.Contains(got, "+2") {
+		t.Fatalf("d --staged = %q", got)
+	}
+	if got := must("commit"); !strings.Contains(got, ": from GIT_EDITOR\n") {
+		t.Fatalf("commit = %q", got)
 	}
 }

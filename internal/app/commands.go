@@ -259,16 +259,12 @@ func runRemove(c *cli, args []string) error {
 }
 
 func runList(c *cli, args []string) error {
-	if len(args) != 0 {
-		return usageError{"list takes no arguments"}
-	}
-
 	s, err := c.open()
 	if err != nil {
 		return err
 	}
 
-	files, err := s.Tracked()
+	files, err := s.Tracked(args...)
 	if err != nil {
 		return err
 	}
@@ -363,14 +359,33 @@ func runCommit(c *cli, args []string) error {
 		return usageError{"unexpected argument " + args[0]}
 	}
 
-	*message = strings.TrimSpace(*message)
-	if *message == "" {
-		return usageError{"commit needs a message"}
-	}
+	given := false
+	flags.Visit(func(*flag.Flag) { given = true })
 
 	s, err := c.open()
 	if err != nil {
 		return err
+	}
+
+	if !given {
+		staged, err := s.HasStagedChanges()
+		if err != nil {
+			return err
+		}
+
+		if !staged {
+			fmt.Fprintln(c.stdout, "Nothing to commit.")
+			return nil
+		}
+
+		if *message, err = editCommitMessage(s); err != nil {
+			return err
+		}
+	}
+
+	*message = strings.TrimSpace(*message)
+	if *message == "" {
+		return errors.New("aborting commit due to empty commit message")
 	}
 
 	hash, err := s.Commit(*message)
@@ -382,7 +397,8 @@ func runCommit(c *cli, args []string) error {
 		return err
 	}
 
-	fmt.Fprintf(c.stdout, "Committed %.12s: %s\n", hash, *message)
+	subject, _, _ := strings.Cut(*message, "\n")
+	fmt.Fprintf(c.stdout, "Committed %.12s: %s\n", hash, subject)
 
 	return nil
 }

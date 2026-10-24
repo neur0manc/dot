@@ -2,6 +2,8 @@ package store
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 
 	"github.com/go-git/go-git/v5/config"
 )
@@ -76,4 +78,38 @@ func (s *Store) class() (string, error) {
 	}
 
 	return configuration.Raw.Section(legacyConfigSection).Option("class"), nil
+}
+
+// Editor returns the command for editing commit messages, chosen as Git
+// chooses it: $GIT_EDITOR, core.editor from the repository's and then the
+// user's Git configuration, $VISUAL, $EDITOR, and finally vi (Notepad on
+// Windows).
+func (s *Store) Editor() string {
+	if editor := os.Getenv("GIT_EDITOR"); editor != "" {
+		return editor
+	}
+
+	if local, err := s.repo.Config(); err == nil {
+		if editor := local.Raw.Section("core").Option("editor"); editor != "" {
+			return editor
+		}
+	}
+
+	if global, err := config.LoadConfig(config.GlobalScope); err == nil {
+		if editor := global.Raw.Section("core").Option("editor"); editor != "" {
+			return editor
+		}
+	}
+
+	for _, variable := range []string{"VISUAL", "EDITOR"} {
+		if editor := os.Getenv(variable); editor != "" {
+			return editor
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		return "notepad"
+	}
+
+	return "vi"
 }
