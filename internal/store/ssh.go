@@ -12,7 +12,6 @@ import (
 	"github.com/kevinburke/ssh_config"
 	sshagent "github.com/xanzy/ssh-agent"
 	xssh "golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
 )
 
@@ -45,14 +44,22 @@ var hostKeyAlgorithms = []string{
 
 // sshAuth authenticates like the ssh command: it offers the keys of the
 // running ssh-agent first, then the private keys named by IdentityFile in
-// ~/.ssh/config and the default key files in ~/.ssh. The server's host key
-// is verified against ~/.ssh/known_hosts.
+// ~/.ssh/config and the default key files in ~/.ssh. Encrypted key files ask
+// for their passphrase only when the server gets to them, so a key in the
+// agent never causes a prompt. The server's host key is verified against
+// ~/.ssh/known_hosts; see hostkey.go.
 type sshAuth struct {
-	user     string
-	host     string
-	home     string
-	hostKeys xssh.HostKeyCallback
-	prompt   io.Writer
+	user           string
+	host           string
+	home           string
+	knownHostsPath string
+	prompt         io.Writer
+
+	// askPassphrase returns the passphrase of an encrypted key file.
+	askPassphrase func(filename string) ([]byte, error)
+
+	// confirmHost decides whether to trust a host that is not in known_hosts.
+	confirmHost func(hostname string, key xssh.PublicKey) (bool, error)
 }
 
 func newSSHAuth(user string, host string) (*sshAuth, error) {
@@ -68,24 +75,17 @@ func newSSHAuth(user string, host string) (*sshAuth, error) {
 		)
 	}
 
-	knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
-
-	hostKeys, err := knownhosts.New(knownHostsPath)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"load SSH known-hosts file %q: %w",
-			knownHostsPath,
-			err,
-		)
+	auth := &sshAuth{
+		user:           user,
+		host:           host,
+		home:           home,
+		knownHostsPath: filepath.Join(home, ".ssh", "known_hosts"),
+		prompt:         os.Stderr,
 	}
+	auth.askPassphrase = auth.passphrase
+	auth.confirmHost = auth.askToTrustHost
 
-	return &sshAuth{
-		user:     user,
-		host:     host,
-		home:     home,
-		hostKeys: hostKeys,
-		prompt:   os.Stderr,
-	}, nil
+	return auth, nil
 }
 
 func (a *sshAuth) Name() string { return "dot-ssh" }
@@ -99,7 +99,7 @@ func (a *sshAuth) ClientConfig() (*xssh.ClientConfig, error) {
 	return &xssh.ClientConfig{
 		User:              a.user,
 		Auth:              []xssh.AuthMethod{xssh.PublicKeysCallback(a.signers)},
-		HostKeyCallback:   a.hostKeys,
+		HostKeyCallback:   a.verifyHostKey,
 		HostKeyAlgorithms: hostKeyAlgorithms,
 	}, nil
 }
@@ -132,8 +132,12 @@ func (a *sshAuth) signers() ([]xssh.Signer, error) {
 		add(agentSigners...)
 	}
 
+	// With agent keys on offer, a passphrase is only asked for if the server
+	// prefers an encrypted key file over all of them.
+	deferPassphrase := len(result) > 0
+
 	for _, filename := range a.identityFiles() {
-		signer, err := a.loadKey(filename)
+		signer, err := a.loadKey(filename, deferPassphrase)
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 		case err != nil:
@@ -233,8 +237,12 @@ func (a *sshAuth) expand(filename string) string {
 	}
 }
 
-// loadKey reads a private key file, asking for its passphrase if needed.
-func (a *sshAuth) loadKey(filename string) (xssh.Signer, error) {
+// loadKey reads a private key file. An encrypted key is unlocked right away,
+// or, with deferPassphrase, only when the server asks for its signature.
+func (a *sshAuth) loadKey(
+	filename string,
+	deferPassphrase bool,
+) (xssh.Signer, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -247,12 +255,25 @@ func (a *sshAuth) loadKey(filename string) (xssh.Signer, error) {
 		return signer, err
 	}
 
-	passphrase, err := a.passphrase(filename)
+	unlock := func() (xssh.Signer, error) {
+		passphrase, err := a.askPassphrase(filename)
+		if err != nil {
+			return nil, err
+		}
+
+		return xssh.ParsePrivateKeyWithPassphrase(data, passphrase)
+	}
+
+	if deferPassphrase && missing.PublicKey != nil {
+		return &lockedSigner{publicKey: missing.PublicKey, unlock: unlock}, nil
+	}
+
+	unlocked, err := unlock()
 	if err != nil {
 		return nil, err
 	}
 
-	return xssh.ParsePrivateKeyWithPassphrase(data, passphrase)
+	return unlocked, nil
 }
 
 func (a *sshAuth) passphrase(filename string) ([]byte, error) {
@@ -277,4 +298,45 @@ func (a *sshAuth) passphrase(filename string) ([]byte, error) {
 	}
 
 	return bytes.TrimRight(passphrase, "\r\n"), nil
+}
+
+// lockedSigner stands in for an encrypted key file. Its public key is known
+// from the file, so the server can accept or reject the key first; the
+// passphrase is requested only for the signature.
+type lockedSigner struct {
+	publicKey xssh.PublicKey
+	unlock    func() (xssh.Signer, error)
+	signer    xssh.Signer
+}
+
+func (l *lockedSigner) PublicKey() xssh.PublicKey { return l.publicKey }
+
+func (l *lockedSigner) Sign(random io.Reader, data []byte) (*xssh.Signature, error) {
+	return l.SignWithAlgorithm(random, data, "")
+}
+
+func (l *lockedSigner) SignWithAlgorithm(
+	random io.Reader,
+	data []byte,
+	algorithm string,
+) (*xssh.Signature, error) {
+	if l.signer == nil {
+		signer, err := l.unlock()
+		if err != nil {
+			return nil, err
+		}
+
+		l.signer = signer
+	}
+
+	if algorithm == "" {
+		return l.signer.Sign(random, data)
+	}
+
+	algorithmSigner, ok := l.signer.(xssh.AlgorithmSigner)
+	if !ok {
+		return nil, fmt.Errorf("key does not support algorithm %s", algorithm)
+	}
+
+	return algorithmSigner.SignWithAlgorithm(random, data, algorithm)
 }

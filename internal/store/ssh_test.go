@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -53,6 +54,10 @@ func writeKeyFile(t *testing.T, filename string, key ed25519.PrivateKey, passphr
 	if err := os.WriteFile(filename, pem.EncodeToMemory(block), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func knownhostsLine(address string, key xssh.PublicKey) string {
+	return knownhosts.Line([]string{knownhosts.Normalize(address)}, key)
 }
 
 // startSSHServer runs a server that accepts only authorized and records the
@@ -108,7 +113,7 @@ func startSSHServer(t *testing.T, home string, authorized xssh.PublicKey) string
 	}()
 
 	address := listener.Addr().String()
-	line := knownhosts.Line([]string{knownhosts.Normalize(address)}, hostSigner.PublicKey())
+	line := knownhostsLine(address, hostSigner.PublicKey())
 
 	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
 		t.Fatal(err)
@@ -133,7 +138,34 @@ func sshHome(t *testing.T) string {
 	return home
 }
 
+// dial connects with a host trust prompt that fails the test, so that hosts
+// in known_hosts must verify without asking.
 func dial(t *testing.T, address string) error {
+	t.Helper()
+
+	return dialWith(t, address, func(auth *sshAuth) {
+		auth.confirmHost = func(string, xssh.PublicKey) (bool, error) {
+			t.Error("unexpected host trust prompt")
+
+			return false, nil
+		}
+	})
+}
+
+func dialConfirming(
+	t *testing.T,
+	address string,
+	confirmHost func(string, xssh.PublicKey) (bool, error),
+) error {
+	t.Helper()
+
+	return dialWith(t, address, func(auth *sshAuth) {
+		auth.confirmHost = confirmHost
+	})
+}
+
+// dialWith connects after letting configure adjust the authentication.
+func dialWith(t *testing.T, address string, configure func(*sshAuth)) error {
 	t.Helper()
 
 	auth, err := newSSHAuth("git", "127.0.0.1")
@@ -141,6 +173,7 @@ func dial(t *testing.T, address string) error {
 		t.Fatal(err)
 	}
 	auth.prompt = &strings.Builder{}
+	configure(auth)
 
 	configuration, err := auth.ClientConfig()
 	if err != nil {
@@ -206,20 +239,19 @@ func TestSSHEncryptedKeyNeedsPassphrase(t *testing.T) {
 	}
 }
 
-func TestSSHPrefersAgentKeys(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses a Unix socket agent")
-	}
+// serveAgent serves keyring on a Unix socket and returns its path.
+func serveAgent(t *testing.T, keyring agent.Agent) string {
+	t.Helper()
 
-	home := sshHome(t)
-	private, public := newKey(t)
-
-	keyring := agent.NewKeyring()
-	if err := keyring.Add(agent.AddedKey{PrivateKey: private}); err != nil {
+	// t.TempDir embeds the test name, which can exceed the Unix socket path
+	// limit (104 bytes on macOS), so use a short directory.
+	directory, err := os.MkdirTemp("", "dot")
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { os.RemoveAll(directory) })
 
-	socket := filepath.Join(t.TempDir(), "agent.sock")
+	socket := filepath.Join(directory, "agent.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -237,7 +269,23 @@ func TestSSHPrefersAgentKeys(t *testing.T) {
 		}
 	}()
 
-	t.Setenv("SSH_AUTH_SOCK", socket)
+	return socket
+}
+
+func TestSSHPrefersAgentKeys(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a Unix socket agent")
+	}
+
+	home := sshHome(t)
+	private, public := newKey(t)
+
+	keyring := agent.NewKeyring()
+	if err := keyring.Add(agent.AddedKey{PrivateKey: private}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, keyring))
 
 	address := startSSHServer(t, home, public)
 
@@ -271,12 +319,71 @@ func TestSSHRejectsChangedHostKey(t *testing.T) {
 
 	// Record a different key for the host.
 	_, other := newKey(t)
-	line := knownhosts.Line([]string{knownhosts.Normalize(address)}, other)
+	line := knownhostsLine(address, other)
 	if err := os.WriteFile(filepath.Join(home, ".ssh", "known_hosts"), []byte(line+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := dial(t, address); err == nil {
 		t.Fatal("expected host key mismatch to be rejected")
+	}
+}
+
+func TestSSHFallsBackToFileWhenAgentKeyIsRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a Unix socket agent")
+	}
+
+	home := sshHome(t)
+	private, public := newKey(t)
+	writeKeyFile(t, filepath.Join(home, ".ssh", "id_ed25519"), private, "")
+
+	otherPrivate, _ := newKey(t)
+	keyring := agent.NewKeyring()
+	if err := keyring.Add(agent.AddedKey{PrivateKey: otherPrivate}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, keyring))
+
+	address := startSSHServer(t, home, public)
+
+	if err := dial(t, address); err != nil {
+		t.Fatalf("authentication with key file failed: %v", err)
+	}
+}
+
+func TestSSHAgentKeyNeverAsksForPassphrase(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a Unix socket agent")
+	}
+
+	home := sshHome(t)
+	private, public := newKey(t)
+
+	otherPrivate, _ := newKey(t)
+	writeKeyFile(t, filepath.Join(home, ".ssh", "id_ed25519"), otherPrivate, "secret")
+
+	keyring := agent.NewKeyring()
+	if err := keyring.Add(agent.AddedKey{PrivateKey: private}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, keyring))
+
+	address := startSSHServer(t, home, public)
+
+	asked := false
+	err := dialWith(t, address, func(auth *sshAuth) {
+		auth.askPassphrase = func(string) ([]byte, error) {
+			asked = true
+
+			return nil, errors.New("no passphrase")
+		}
+	})
+	if err != nil {
+		t.Fatalf("authentication with agent key failed: %v", err)
+	}
+
+	if asked {
+		t.Fatal("asked for a passphrase although the agent key was accepted")
 	}
 }
