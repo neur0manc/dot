@@ -36,7 +36,7 @@ func (s *Store) UpgradeLinkedVariants() ([]string, error) {
 	var notes []string
 
 	for _, name := range slices.Sorted(maps.Keys(files)) {
-		filePath, conditions := SplitName(name)
+		filePath, conditions := s.facts.SplitName(name)
 		if conditions == nil {
 			continue
 		}

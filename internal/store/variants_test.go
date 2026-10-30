@@ -34,7 +34,7 @@ func TestSplitName(t *testing.T) {
 		"##os.linux":                     "##os.linux|",
 		".zshrc##":                       ".zshrc##|",
 	} {
-		filePath, conditions := SplitName(name)
+		filePath, conditions := Facts{}.SplitName(name)
 		if got := filePath + "|" + strings.Join(conditions, ","); got != want {
 			t.Errorf("SplitName(%q) = %q, want %q", name, got, want)
 		}

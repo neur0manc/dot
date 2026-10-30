@@ -127,25 +127,31 @@ const (
 	ReadmePath = ".local/dot/README.md"
 )
 
-// SplitName splits the name of a tracked file into the path it has on disk
-// and its conditions, which are nil for a plain file.
-func SplitName(name string) (string, []string) {
+// splitVariant splits the name of a tracked file into its path and its
+// conditions, which are nil for a plain file.
+func splitVariant(name string) (string, []string) {
 	directory, file := path.Split(name)
 
 	base, conditions, found := strings.Cut(file, variantSeparator)
 	if !found || base == "" || conditions == "" {
-		return diskPath(name), nil
+		return name, nil
 	}
 
-	return diskPath(directory + base), strings.Split(conditions, ",")
+	return directory + base, strings.Split(conditions, ",")
 }
 
-// VariantName returns the name under which the variant of filePath for the
-// given conditions is tracked.
-func VariantName(filePath string, conditions []string) string {
-	if filePath == ReadmePath {
-		filePath = readmeName
-	}
+// SplitName splits the name of a tracked file into the path it has on this
+// machine's disk and its conditions, which are nil for a plain file.
+func (f Facts) SplitName(name string) (string, []string) {
+	base, conditions := splitVariant(name)
+
+	return f.diskPath(base), conditions
+}
+
+// VariantName returns the name under which the variant of filePath, a path on
+// disk, for the given conditions is tracked.
+func (f Facts) VariantName(filePath string, conditions []string) string {
+	filePath = f.trackedPath(filePath)
 
 	if len(conditions) == 0 {
 		return filePath
@@ -155,17 +161,28 @@ func VariantName(filePath string, conditions []string) string {
 }
 
 // diskPath returns the path on disk of a tracked file without conditions.
-func diskPath(name string) string {
+func (f Facts) diskPath(name string) string {
 	if name == readmeName {
 		return ReadmePath
 	}
 
-	return name
+	return f.expandAlias(name)
+}
+
+// trackedPath is the reverse of diskPath.
+func (f Facts) trackedPath(filePath string) string {
+	if filePath == ReadmePath {
+		return readmeName
+	}
+
+	return f.collapseAlias(filePath)
 }
 
 // Describe formats a tracked name for people: ".zshrc (os.darwin)".
+//
+// Paths are shown as they are on this machine.
 func Describe(name string) string {
-	filePath, conditions := SplitName(name)
+	filePath, conditions := Facts{OS: runtime.GOOS}.SplitName(name)
 	if conditions == nil {
 		return filePath
 	}
@@ -272,7 +289,7 @@ func (f Facts) show(files map[string]treeEntry) map[string]shownEntry {
 	slices.Sort(names) // ties go to the first name
 
 	for _, name := range names {
-		filePath, conditions := SplitName(name)
+		filePath, conditions := f.SplitName(name)
 
 		weight, matches := f.score(conditions)
 		if !matches {

@@ -177,16 +177,16 @@ func (s *Store) add(conditions []string, arguments []string) ([]AddedFile, error
 			return nil, err
 		}
 
-		result := AddedFile{Name: VariantName(filePath, nil)}
+		result := AddedFile{Name: s.facts.VariantName(filePath, nil)}
 
 		switch {
 		case conditions != nil:
-			result.Name = VariantName(filePath, conditions)
+			result.Name = s.facts.VariantName(filePath, conditions)
 
 			_, fitsHere := s.facts.score(conditions)
-			variants := variantsOf(files, filePath)
+			variants := s.variantsOf(files, filePath)
 
-			if plain := VariantName(filePath, nil); fitsHere && len(variants) == 1 && variants[0] == plain {
+			if plain := s.facts.VariantName(filePath, nil); fitsHere && len(variants) == 1 && variants[0] == plain {
 				idx.Remove(plain)
 				result.Replaces = plain
 			}
@@ -204,7 +204,7 @@ func (s *Store) add(conditions []string, arguments []string) ([]AddedFile, error
 
 	shown = s.facts.show(indexFiles(idx))
 	for index, result := range added {
-		filePath, _ := SplitName(result.Name)
+		filePath, _ := s.facts.SplitName(result.Name)
 		added[index].Used = shown[filePath].name == result.Name
 	}
 
@@ -240,7 +240,7 @@ func (s *Store) AddTracked() ([]FileState, error) {
 				return nil, fmt.Errorf("stage deletion of %q: %w", state.Name, err)
 			}
 		} else {
-			filePath, _ := SplitName(state.Name)
+			filePath, _ := s.facts.SplitName(state.Name)
 
 			file, err := s.readWorktree(filePath, files[state.Name].mode)
 			if err != nil {
@@ -271,11 +271,11 @@ func (s *Store) AddTracked() ([]FileState, error) {
 
 // variantsOf returns the tracked names that are stored for filePath: the
 // plain file and its variants.
-func variantsOf(files map[string]treeEntry, filePath string) []string {
+func (s *Store) variantsOf(files map[string]treeEntry, filePath string) []string {
 	var names []string
 
 	for name := range files {
-		if p, _ := SplitName(name); p == filePath {
+		if p, _ := s.facts.SplitName(name); p == filePath {
 			names = append(names, name)
 		}
 	}
@@ -339,7 +339,7 @@ func collectFiles(full string, name string, gitDir string) ([]string, error) {
 
 // checkPlainName rejects files whose names look like variants.
 func checkPlainName(name string) error {
-	if _, conditions := SplitName(name); conditions != nil {
+	if _, conditions := splitVariant(name); conditions != nil {
 		return fmt.Errorf(
 			"%q has %q in its name, which marks variants in the repository; "+
 				"rename it and add it with conditions instead",
@@ -378,16 +378,16 @@ func (s *Store) Remove(conditions []string, arguments ...string) ([]string, erro
 		before := len(removed)
 
 		for name := range files {
-			if p, _ := SplitName(name); strings.HasPrefix(p, filePath+"/") {
+			if p, _ := s.facts.SplitName(name); strings.HasPrefix(p, filePath+"/") {
 				removed = append(removed, name)
 			}
 		}
 
-		variants := variantsOf(files, filePath)
+		variants := s.variantsOf(files, filePath)
 
 		switch {
 		case len(conditions) > 0:
-			name := VariantName(filePath, conditions)
+			name := s.facts.VariantName(filePath, conditions)
 			if !slices.Contains(variants, name) {
 				return nil, fmt.Errorf("%s is not tracked", Describe(name))
 			}
@@ -460,7 +460,7 @@ func (s *Store) Tracked(arguments ...string) ([]TrackedFile, error) {
 	tracked := make([]TrackedFile, 0, len(files))
 
 	for _, name := range slices.Sorted(maps.Keys(files)) {
-		filePath, _ := SplitName(name)
+		filePath, _ := s.facts.SplitName(name)
 		if len(prefixes) > 0 && !slices.ContainsFunc(prefixes, func(prefix string) bool {
 			return filePath == prefix || strings.HasPrefix(filePath, prefix+"/")
 		}) {
