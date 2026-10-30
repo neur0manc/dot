@@ -501,18 +501,34 @@ func runConfig(c *cli, args []string) error {
 	return err
 }
 
+// remoteOperations maps the operations of dot remote to the number of
+// arguments they take.
+var remoteOperations = map[string]struct {
+	arguments int
+	usage     string
+}{
+	"list":    {0, "remote list takes no arguments"},
+	"add":     {2, "remote add needs a name and a URL"},
+	"remove":  {1, "remote remove needs a name"},
+	"rm":      {1, "remote remove needs a name"},
+	"rename":  {2, "remote rename needs the old and the new name"},
+	"set-url": {2, "remote set-url needs a name and a URL"},
+	"default": {1, "remote default needs a name"},
+}
+
 func runRemote(c *cli, args []string) error {
-	if len(args) == 0 {
-		return usageError{"remote needs an operation: add or list"}
+	operation := "list"
+	if len(args) > 0 {
+		operation, args = args[0], args[1:]
 	}
 
-	switch {
-	case args[0] == "add" && len(args) != 3:
-		return usageError{"remote add needs a name and a URL"}
-	case args[0] == "list" && len(args) != 1:
-		return usageError{"remote list takes no arguments"}
-	case args[0] != "add" && args[0] != "list":
-		return usageError{fmt.Sprintf("unknown remote operation %q", args[0])}
+	spec, ok := remoteOperations[operation]
+	if !ok {
+		return usageError{fmt.Sprintf("unknown remote operation %q", operation)}
+	}
+
+	if len(args) != spec.arguments {
+		return usageError{spec.usage}
 	}
 
 	s, err := c.open()
@@ -520,16 +536,45 @@ func runRemote(c *cli, args []string) error {
 		return err
 	}
 
-	if args[0] == "add" {
-		if err := s.AddRemote(args[1], args[2]); err != nil {
+	switch operation {
+	case "list":
+		return listRemotes(c, s)
+	case "add":
+		if err := s.AddRemote(args[0], args[1]); err != nil {
 			return err
 		}
 
-		fmt.Fprintf(c.stdout, "Added remote %s: %s\n", args[1], args[2])
+		fmt.Fprintf(c.stdout, "Added remote %s: %s\n", args[0], args[1])
+	case "remove", "rm":
+		if err := s.RemoveRemote(args[0]); err != nil {
+			return err
+		}
 
-		return nil
+		fmt.Fprintf(c.stdout, "Removed remote %s\n", args[0])
+	case "rename":
+		if err := s.RenameRemote(args[0], args[1]); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(c.stdout, "Renamed remote %s to %s\n", args[0], args[1])
+	case "set-url":
+		if err := s.SetRemoteURL(args[0], args[1]); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(c.stdout, "Remote %s now points to %s\n", args[0], args[1])
+	case "default":
+		if err := s.SetUpstream(args[0]); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(c.stdout, "push and pull now use %s by default\n", args[0])
 	}
 
+	return nil
+}
+
+func listRemotes(c *cli, s *store.Store) error {
 	remotes, err := s.Remotes()
 	if err != nil {
 		return err
@@ -544,10 +589,11 @@ func runRemote(c *cli, args []string) error {
 	return nil
 }
 
+// remoteArgument returns the remote named in args, or "" if there is none.
 func remoteArgument(args []string) (string, error) {
 	switch len(args) {
 	case 0:
-		return "origin", nil
+		return "", nil
 	case 1:
 		return args[0], nil
 	default:
@@ -556,7 +602,16 @@ func remoteArgument(args []string) (string, error) {
 }
 
 func runPush(c *cli, args []string) error {
-	remote, err := remoteArgument(args)
+	flags := newFlags("push")
+	setUpstream := flags.Bool("set-upstream", false, "")
+	flags.BoolVar(setUpstream, "u", false, "")
+
+	args, err := parseFlags(flags, args)
+	if err != nil {
+		return err
+	}
+
+	name, err := remoteArgument(args)
 	if err != nil {
 		return err
 	}
@@ -566,9 +621,20 @@ func runPush(c *cli, args []string) error {
 		return err
 	}
 
+	remote, err := s.ResolveRemote(name)
+	if err != nil {
+		return err
+	}
+
 	pushed, err := s.Push(remote, c.stderr)
 	if err != nil {
 		return err
+	}
+
+	if *setUpstream {
+		if err := s.SetUpstream(remote); err != nil {
+			return err
+		}
 	}
 
 	if !pushed {
@@ -590,12 +656,17 @@ func runPull(c *cli, args []string) error {
 		return err
 	}
 
-	remote, err := remoteArgument(args)
+	name, err := remoteArgument(args)
 	if err != nil {
 		return err
 	}
 
 	s, err := c.open()
+	if err != nil {
+		return err
+	}
+
+	remote, err := s.ResolveRemote(name)
 	if err != nil {
 		return err
 	}
