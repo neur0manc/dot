@@ -59,6 +59,11 @@ on another machine `dot clone <url>` checks the files out into `$HOME`.
 files that already exist with different content are never overwritten
 unless you pass `--force` (also for `pull` and `checkout`).
 
+`dot pull` fast-forwards when it can. when you and the remote both have new
+commits, it merges them file by file and records a merge commit. if both
+sides changed the same file differently, it lists the files and changes
+nothing; dot does not merge file contents.
+
 ### per-os and per-host files
 
 a tracked file can have variants for different machines. say which machines

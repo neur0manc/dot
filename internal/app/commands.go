@@ -671,17 +671,19 @@ func runPull(c *cli, args []string) error {
 		return err
 	}
 
-	updated, err := s.Pull(remote, *force, c.stderr)
+	result, err := s.Pull(remote, *force, c.stderr)
 	if err != nil {
 		return conflictHint(err, "--force")
 	}
 
-	if !updated {
+	switch {
+	case result.Merged:
+		fmt.Fprintf(c.stdout, "Merged %s into the current branch.\n", remote)
+	case result.Updated:
+		fmt.Fprintf(c.stdout, "Updated current branch from %s.\n", remote)
+	default:
 		fmt.Fprintln(c.stdout, "Already up-to-date.")
-		return nil
 	}
-
-	fmt.Fprintf(c.stdout, "Updated current branch from %s.\n", remote)
 
 	return nil
 }
