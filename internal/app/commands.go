@@ -183,10 +183,16 @@ func printResult(c *cli, result store.SyncResult) {
 func runAdd(c *cli, args []string) error {
 	flags := newFlags("add")
 	conditionFlags := addConditionFlags(flags)
+	update := flags.Bool("update", false, "")
+	flags.BoolVar(update, "u", false, "")
 
 	args, err := parseFlags(flags, args)
 	if err != nil {
 		return err
+	}
+
+	if *update {
+		return runAddUpdate(c, args)
 	}
 
 	if len(args) == 0 {
@@ -222,6 +228,33 @@ func runAdd(c *cli, args []string) error {
 		default:
 			fmt.Fprintf(c.stdout, "Added %s\n", store.Describe(file.Name))
 		}
+	}
+
+	return nil
+}
+
+// runAddUpdate stages every change to tracked files, like `git add -u`.
+func runAddUpdate(c *cli, args []string) error {
+	if len(args) != 0 {
+		return usageError{"add -u takes no paths"}
+	}
+
+	s, err := c.open()
+	if err != nil {
+		return err
+	}
+
+	staged, err := s.AddTracked()
+	if err != nil {
+		return err
+	}
+
+	if len(staged) == 0 {
+		fmt.Fprintln(c.stdout, "Nothing to stage.")
+	}
+
+	for _, state := range staged {
+		fmt.Fprintf(c.stdout, "Staged %s %s\n", strings.TrimSuffix(codeLabel(state.Worktree), ":"), store.Describe(state.Name))
 	}
 
 	return nil
@@ -300,13 +333,12 @@ func runStatus(c *cli, args []string) error {
 		return err
 	}
 
-	for _, state := range states {
-		fmt.Fprintf(c.stdout, "%c%c %s\n", state.Staged, state.Worktree, store.Describe(state.Name))
-	}
-
 	if len(states) == 0 {
 		fmt.Fprintln(c.stdout, "All tracked files are in sync.")
+		return nil
 	}
+
+	writeStatus(c.stdout, states, supportsColor(c.stdout))
 
 	return nil
 }

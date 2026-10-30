@@ -112,7 +112,7 @@ func commands() []command {
 	return []command{
 		{"init", "", "Create an empty repository", runInit},
 		{"clone", "[--force] <url>", "Clone a repository and put its files into your home directory", runClone},
-		{"add", "[conditions] <path>...", "Track files, or all files in directories; conditions make them variants", runAdd},
+		{"add", "[conditions] <path>... | -u", "Track files, or all files in directories; conditions make them variants; -u stages changes to tracked files", runAdd},
 		{"rm", "[conditions] <path>...", "Stop tracking files; the files stay on disk", runRemove},
 		{"list", "[<path>...]", "List tracked files and variants, or those at or beneath paths", runList},
 		{"status", "", "Show staged and modified tracked files", runStatus},
