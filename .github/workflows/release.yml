@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+    tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']
 
 permissions:
   contents: write
@@ -20,4 +20,9 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "dot $GITHUB_REF_NAME" --generate-notes --verify-tag
+        run: |
+          case $GITHUB_REF_NAME in
+          *-*) prerelease=--prerelease ;;
+          *) prerelease= ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" dist/* --title "dot $GITHUB_REF_NAME" --generate-notes --verify-tag $prerelease
