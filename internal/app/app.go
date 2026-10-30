@@ -122,7 +122,7 @@ func commands() []command {
 		{"config", "<user.name|user.email|local.class> [value]", "Read or set the commit identity or machine class", runConfig},
 		{"remote", "add <name> <url> | list", "Manage remotes", runRemote},
 		{"push", "[remote]", "Push the current branch; defaults to origin", runPush},
-		{"pull", "[--force] [remote]", "Fast-forward from a remote and update tracked files", runPull},
+		{"pull", "[--force] [remote]", "Fetch a remote, merge it if needed and update tracked files", runPull},
 		{"repo-path", "", "Show the Git directory", runRepoPath},
 		{"platform", "", "Show what variants are matched against", runPlatform},
 		{"completion", "<bash|zsh|fish>", "Print a shell completion script", runCompletion},

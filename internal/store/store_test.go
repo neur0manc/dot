@@ -413,8 +413,8 @@ func TestCloneAndPull(t *testing.T) {
 	expectStatus(t, clone)
 
 	// Up to date.
-	if updated, err := clone.Pull("origin", false, io.Discard); err != nil || updated {
-		t.Fatalf("pull without changes: %v %v", updated, err)
+	if result, err := clone.Pull("origin", false, io.Discard); err != nil || result.Updated {
+		t.Fatalf("pull without changes: %v %v", result, err)
 	}
 
 	// Machine A changes one file, adds one and removes one.
@@ -435,9 +435,9 @@ func TestCloneAndPull(t *testing.T) {
 	// Machine B has an unrelated local edit that the update must not touch.
 	b.write(t, ".config/tool/other", "mine\n")
 
-	updated, err := clone.Pull("origin", false, io.Discard)
-	if err != nil || !updated {
-		t.Fatalf("pull: %v %v", updated, err)
+	pulled, err := clone.Pull("origin", false, io.Discard)
+	if err != nil || !pulled.Updated || pulled.Merged {
+		t.Fatalf("pull: %v %v", pulled, err)
 	}
 
 	if b.read(t, ".config/tool/conf") != "v2\n" ||
@@ -513,7 +513,7 @@ func TestPullConflictAndForce(t *testing.T) {
 	expectStatus(t, clone, " M .keep")
 }
 
-func TestPullRefusesStagedChangesAndDivergence(t *testing.T) {
+func TestPullRefusesStagedChanges(t *testing.T) {
 	a := newMachine(t)
 	source := a.init(t)
 
@@ -538,28 +538,6 @@ func TestPullRefusesStagedChangesAndDivergence(t *testing.T) {
 
 	if _, err := clone.Pull("origin", false, io.Discard); !errors.Is(err, ErrPullStagedChanges) {
 		t.Fatalf("want ErrPullStagedChanges, got %v", err)
-	}
-
-	if err := clone.SetConfig("user.name", "Test"); err != nil {
-		t.Fatal(err)
-	}
-	if err := clone.SetConfig("user.email", "test@example.com"); err != nil {
-		t.Fatal(err)
-	}
-
-	mustCommit(t, clone, "local")
-
-	a.write(t, ".rc", "two\n")
-	if _, err := source.Add("~/.rc"); err != nil {
-		t.Fatal(err)
-	}
-	mustCommit(t, source, "remote")
-	if _, err := source.Push("origin", io.Discard); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := clone.Pull("origin", false, io.Discard); !errors.Is(err, ErrPullNonFastForward) {
-		t.Fatalf("want ErrPullNonFastForward, got %v", err)
 	}
 }
 
