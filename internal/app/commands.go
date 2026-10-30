@@ -311,12 +311,10 @@ func runList(c *cli, args []string) error {
 	for _, file := range files {
 		line := store.Describe(file.Name)
 		if !file.Used {
-			note := " [not on this machine]"
+			line += " [not on this machine]"
 			if color {
-				note = colorFaint + note + colorReset
+				line = colorFaint + line + colorReset
 			}
-
-			line += note
 		}
 
 		fmt.Fprintln(c.stdout, line)
