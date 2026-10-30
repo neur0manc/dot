@@ -211,6 +211,64 @@ func (s *Store) add(conditions []string, arguments []string) ([]AddedFile, error
 	return added, nil
 }
 
+// AddTracked stages every change that tracked files have in the working tree:
+// modified files are added again and files deleted from disk are removed from
+// the repository. It returns the staged changes, described by the Worktree
+// code they had before.
+func (s *Store) AddTracked() ([]FileState, error) {
+	states, err := s.Status()
+	if err != nil {
+		return nil, err
+	}
+
+	idx, err := s.loadIndex()
+	if err != nil {
+		return nil, err
+	}
+
+	files := indexFiles(idx)
+
+	var staged []FileState
+
+	for _, state := range states {
+		if state.Worktree == Unmodified {
+			continue
+		}
+
+		if state.Worktree == Deleted {
+			if _, err := idx.Remove(state.Name); err != nil {
+				return nil, fmt.Errorf("stage deletion of %q: %w", state.Name, err)
+			}
+		} else {
+			filePath, _ := SplitName(state.Name)
+
+			file, err := s.readWorktree(filePath, files[state.Name].mode)
+			if err != nil {
+				return nil, fmt.Errorf("read %q: %w", filePath, err)
+			}
+
+			hash, err := s.writeBlob(file.data)
+			if err != nil {
+				return nil, err
+			}
+
+			setEntry(idx, state.Name, hash, file.mode, file.size, file.modTime)
+		}
+
+		staged = append(staged, state)
+	}
+
+	if len(staged) == 0 {
+		return nil, nil
+	}
+
+	if err := s.saveIndex(idx); err != nil {
+		return nil, err
+	}
+
+	return staged, nil
+}
+
 // variantsOf returns the tracked names that are stored for filePath: the
 // plain file and its variants.
 func variantsOf(files map[string]treeEntry, filePath string) []string {

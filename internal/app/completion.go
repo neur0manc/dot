@@ -34,7 +34,7 @@ var conditionFlagNames = []string{"--os", "--arch", "--class", "--host"}
 // commandFlags lists the flags of each command, for completion.
 var commandFlags = map[string][]string{
 	"clone":    {"--force"},
-	"add":      conditionFlagNames,
+	"add":      append([]string{"-u", "--update"}, conditionFlagNames...),
 	"rm":       conditionFlagNames,
 	"diff":     {"--staged"},
 	"commit":   {"-m", "--message"},

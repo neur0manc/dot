@@ -43,7 +43,8 @@ environment variables are now called `DOT_…` instead of `DOTMGR_…`.
 
     dot init                      # or: dot clone <url>
     dot add ~/.vimrc ~/.config/foo
-    dot status                    # staged / modified tracked files
+    dot status                    # staged and not staged changes
+    dot add -u                    # stage all changes to tracked files
     dot ls .                      # tracked files here and below
     dot diff
     dot commit -m "add vim config"

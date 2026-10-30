@@ -76,6 +76,7 @@ func TestUsageErrors(t *testing.T) {
 		{"remote", "rename", "only-old"},
 		{"remote", "bogus"},
 		{"status", "extra"},
+		{"add", "-u", "~/.vimrc"},
 		{"p", "one", "two"}, // alias of push
 	} {
 		code, _, stderr := run(t, args...)
@@ -125,7 +126,7 @@ func TestEndToEnd(t *testing.T) {
 
 	must("add", "~/.vimrc")
 
-	if got := must("status"); got != "A  .vimrc\n" {
+	if got := must("status"); got != "Staged (will be committed):\n  new file:  .vimrc\n" {
 		t.Fatalf("status = %q", got)
 	}
 
@@ -141,7 +142,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := must("status"); got != " M .vimrc\n" {
+	if got := must("status"); got != "Not staged (use `dot add -u` to stage all):\n  modified:  .vimrc\n" {
 		t.Fatalf("status = %q", got)
 	}
 
@@ -170,14 +171,74 @@ func TestEndToEnd(t *testing.T) {
 	if got := must("list", "~"); got != ".config/app/conf\n.vimrc\n" {
 		t.Fatalf("list ~ = %q", got)
 	}
-	if got := must("s"); got != "A  .config/app/conf\n M .vimrc\n" {
+	if got := must("s"); got != "Staged (will be committed):\n  new file:  .config/app/conf\n\nNot staged (use `dot add -u` to stage all):\n  modified:  .vimrc\n" {
 		t.Fatalf("s = %q", got)
 	}
 
 	must("rm", "~/.vimrc")
 
-	if got := must("status"); got != "A  .config/app/conf\nD  .vimrc\n" {
+	if got := must("status"); got != "Staged (will be committed):\n  new file:  .config/app/conf\n  deleted:   .vimrc\n" {
 		t.Fatalf("status after rm = %q", got)
+	}
+}
+
+func TestAddUpdateStagesAllChanges(t *testing.T) {
+	home := setup(t)
+
+	must := func(args ...string) string {
+		t.Helper()
+
+		code, stdout, stderr := run(t, args...)
+		if code != 0 {
+			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
+		}
+
+		return stdout
+	}
+
+	write := func(name string, content string) {
+		t.Helper()
+
+		if err := os.WriteFile(filepath.Join(home, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	must("init")
+	must("config", "user.name", "Test")
+	must("config", "user.email", "test@example.com")
+
+	write(".a", "1\n")
+	write(".b", "1\n")
+	write(".c", "1\n")
+	must("add", "~/.a", "~/.b", "~/.c")
+	must("commit", "-m", "first")
+
+	if got := must("add", "-u"); got != "Nothing to stage.\n" {
+		t.Fatalf("add -u on a clean tree = %q", got)
+	}
+
+	write(".a", "2\n")
+	write(".untracked", "x\n")
+
+	if err := os.Remove(filepath.Join(home, ".b")); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "Staged modified .a\nStaged deleted .b\n"
+	if got := must("add", "--update"); got != want {
+		t.Fatalf("add --update = %q, want %q", got, want)
+	}
+
+	want = "Staged (will be committed):\n  modified:  .a\n  deleted:   .b\n"
+	if got := must("status"); got != want {
+		t.Fatalf("status = %q, want %q", got, want)
+	}
+
+	must("commit", "-m", "second")
+
+	if got := must("status"); got != "All tracked files are in sync.\n" {
+		t.Fatalf("status after commit = %q", got)
 	}
 }
 
@@ -239,7 +300,7 @@ func TestVariants(t *testing.T) {
 	if err := os.WriteFile(rc, []byte("changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := must("status"); got != " M .rc (os."+runtime.GOOS+")\n" {
+	if got := must("status"); got != "Not staged (use `dot add -u` to stage all):\n  modified:  .rc (os."+runtime.GOOS+")\n" {
 		t.Fatalf("status = %q", got)
 	}
 	must("add", "~/.rc")
