@@ -50,6 +50,11 @@ environment variables are now called `DOT_…` instead of `DOTMGR_…`.
     dot remote add origin <url>
     dot push
 
+`dot remote` lists the remotes; `add`, `remove`, `rename`, `set-url` and
+`default` change them. the first remote you push to becomes the default for
+`dot push` and `dot pull`; change it with `dot push -u <remote>` or
+`dot remote default <remote>`. without an upstream, both use `origin`.
+
 on another machine `dot clone <url>` checks the files out into `$HOME`.
 files that already exist with different content are never overwritten
 unless you pass `--force` (also for `pull` and `checkout`).

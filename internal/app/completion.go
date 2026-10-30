@@ -40,6 +40,7 @@ var commandFlags = map[string][]string{
 	"commit":   {"-m", "--message"},
 	"checkout": {"--force"},
 	"pull":     {"--force"},
+	"push":     {"--set-upstream", "-u"},
 }
 
 func runCompletion(c *cli, args []string) error {
@@ -132,8 +133,11 @@ func candidates(c *cli, words []string, current string) []string {
 			return remoteNames(c)
 		}
 	case "remote":
-		if arguments == 0 {
-			return []string{"add", "list"}
+		switch {
+		case arguments == 0:
+			return []string{"add", "default", "list", "remove", "rename", "set-url"}
+		case arguments == 1 && slices.Contains([]string{"default", "remove", "rm", "rename", "set-url"}, words[1]):
+			return remoteNames(c)
 		}
 	case "config":
 		if arguments == 0 {

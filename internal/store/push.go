@@ -13,6 +13,9 @@ import (
 
 // Push pushes the current branch to the same-named branch of remoteName.
 //
+// The first remote a branch is pushed to becomes its upstream; SetUpstream
+// changes it later.
+//
 // The returned Boolean is true when data was pushed and false when the remote
 // was already up to date.
 func (s *Store) Push(remoteName string, progress io.Writer) (bool, error) {
@@ -73,8 +76,16 @@ func (s *Store) Push(remoteName string, progress io.Writer) (bool, error) {
 		)
 	}
 
-	if err := s.setUpstream(branch, remoteName); err != nil {
+	// A later push to another remote must not silently change the default.
+	current, err := s.upstream(branch)
+	if err != nil {
 		return false, err
+	}
+
+	if current == "" {
+		if err := s.setUpstream(branch, remoteName); err != nil {
+			return false, err
+		}
 	}
 
 	return pushed, nil

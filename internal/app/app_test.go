@@ -72,8 +72,9 @@ func TestUsageErrors(t *testing.T) {
 		{"rm"},
 		{"commit", "extra"},
 		{"clone"},
-		{"remote"},
 		{"remote", "add", "only-name"},
+		{"remote", "rename", "only-old"},
+		{"remote", "bogus"},
 		{"status", "extra"},
 		{"p", "one", "two"}, // alias of push
 	} {
@@ -373,11 +374,45 @@ func TestCompletion(t *testing.T) {
 		{[]string{"add", "--os=li"}, "--os=linux "},
 		{[]string{"add", ".z"}, ":files "},
 		{[]string{"rm", "~/."}, "~/.zshrc "},
-		{[]string{"remote", ""}, "add list "},
+		{[]string{"remote", ""}, "add default list remove rename set-url "},
 		{[]string{"status", ""}, ""},
 	} {
 		if got := complete(test.args...); got != test.want {
 			t.Errorf("%q: got %q, want %q", test.args, got, test.want)
 		}
+	}
+}
+
+func TestRemoteOperations(t *testing.T) {
+	setup(t)
+
+	must := func(args ...string) string {
+		t.Helper()
+
+		code, stdout, stderr := run(t, args...)
+		if code != 0 {
+			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
+		}
+
+		return stdout
+	}
+
+	must("init")
+	must("remote", "add", "origin", "https://example.org/a.git")
+	must("remote", "add", "backup", "https://example.org/b.git")
+
+	want := "backup\thttps://example.org/b.git\norigin\thttps://example.org/a.git\n"
+	if got := must("remote"); got != want {
+		t.Fatalf("bare remote = %q, want %q", got, want)
+	}
+
+	must("remote", "rename", "backup", "mirror")
+	must("remote", "set-url", "origin", "https://example.org/c.git")
+	must("remote", "default", "mirror")
+	must("remote", "rm", "origin")
+
+	want = "mirror\thttps://example.org/b.git\n"
+	if got := must("remote", "list"); got != want {
+		t.Fatalf("remote list = %q, want %q", got, want)
 	}
 }
