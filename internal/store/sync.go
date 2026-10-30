@@ -113,7 +113,7 @@ func (s *Store) update(
 	// can switch to another variant when the machine's class changes.
 	committed := map[string][]plumbing.Hash{}
 	for name, entry := range current {
-		filePath, _ := SplitName(name)
+		filePath, _ := s.facts.SplitName(name)
 		committed[filePath] = append(committed[filePath], entry.hash)
 	}
 

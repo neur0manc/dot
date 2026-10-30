@@ -100,6 +100,24 @@ yadm names them (`.zshrc##os.darwin`), so the repository stays readable
 with plain git. dotmgr 0.3 kept those `##` files on disk and linked to them;
 the first command you run after upgrading moves them back.
 
+### one config, different places
+
+some applications keep their files in a different directory on each
+system. a few of them are known to dot, so one tracked copy serves all
+systems:
+
+- `@sublime`: sublime text's config directory (`Library/Application
+  Support/Sublime Text` on macos, `.config/sublime-text` on linux,
+  `AppData/Roaming/Sublime Text` on windows)
+
+    dot add "~/Library/Application Support/Sublime Text/Packages/User"
+
+tracks the files as `@sublime/Packages/User/…`, and every machine writes
+them to its own sublime directory; nothing is created for the other
+systems. you always give the real path of the machine you are on, `dot list`
+and `dot status` show real paths, and variants (`--host`, `--class`, …)
+work as usual.
+
 think twice before tracking secrets such as private ssh keys: `dot push`
 sends them to the remote.
 

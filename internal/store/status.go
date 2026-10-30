@@ -241,7 +241,7 @@ func (s *Store) stagedDiff(idx *index.Index) ([]FileDiff, error) {
 			return nil, err
 		}
 
-		filePath, _ := SplitName(name)
+		filePath, _ := s.facts.SplitName(name)
 		diffs = append(diffs, buildDiff(name, filePath, before, existedBefore, after, existsAfter))
 	}
 
