@@ -13,6 +13,7 @@ import (
 const (
 	colorGreen = "\x1b[32m"
 	colorRed   = "\x1b[31m"
+	colorFaint = "\x1b[2m" // dims the terminal's own color, so it suits light and dark themes
 	colorReset = "\x1b[0m"
 )
 

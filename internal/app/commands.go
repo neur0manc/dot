@@ -306,10 +306,17 @@ func runList(c *cli, args []string) error {
 		return err
 	}
 
+	color := supportsColor(c.stdout)
+
 	for _, file := range files {
 		line := store.Describe(file.Name)
 		if !file.Used {
-			line += " [not on this machine]"
+			note := " [not on this machine]"
+			if color {
+				note = colorFaint + note + colorReset
+			}
+
+			line += note
 		}
 
 		fmt.Fprintln(c.stdout, line)
