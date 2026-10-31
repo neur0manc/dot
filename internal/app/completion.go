@@ -37,6 +37,7 @@ var commandFlags = map[string][]string{
 	"add":      append([]string{"-u", "--update"}, conditionFlagNames...),
 	"rm":       conditionFlagNames,
 	"diff":     {"--staged"},
+	"log":      {"--oneline", "--max-count", "--no-pager", "--color"},
 	"commit":   {"-m", "--message"},
 	"checkout": {"--force"},
 	"pull":     {"--force"},

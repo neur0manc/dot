@@ -679,3 +679,37 @@ func TestPrivateFiles(t *testing.T) {
 		t.Errorf("key after checkout: %o", got)
 	}
 }
+
+func TestLog(t *testing.T) {
+	m := newMachine(t)
+	s := m.init(t)
+
+	if entries, err := s.Log(0); err != nil || len(entries) != 0 {
+		t.Fatalf("empty repository: %v %v", entries, err)
+	}
+
+	m.write(t, ".rc", "one\n")
+	if _, err := s.Add("~/.rc"); err != nil {
+		t.Fatal(err)
+	}
+	mustCommit(t, s, "first")
+
+	m.write(t, ".rc", "two\n")
+	if _, err := s.Add("~/.rc"); err != nil {
+		t.Fatal(err)
+	}
+	mustCommit(t, s, "second")
+
+	entries, err := s.Log(0)
+	if err != nil || len(entries) != 2 || strings.TrimSpace(entries[0].Message) != "second" {
+		t.Fatalf("history: %v %v", entries, err)
+	}
+
+	if len(entries[0].Parents) != 1 || entries[0].Parents[0] != entries[1].Hash {
+		t.Errorf("the second commit must have the first as parent: %v", entries[0].Parents)
+	}
+
+	if limited, err := s.Log(1); err != nil || len(limited) != 1 {
+		t.Fatalf("limit: %v %v", limited, err)
+	}
+}

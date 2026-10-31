@@ -80,6 +80,23 @@ func (s *Store) class() (string, error) {
 	return configuration.Raw.Section(legacyConfigSection).Option("class"), nil
 }
 
+// GitOption reads an option of Git's configuration as Git resolves it: from
+// the repository, else from the user's global configuration. It returns ""
+// when the option is not set.
+func (s *Store) GitOption(section string, option string) string {
+	if local, err := s.repo.Config(); err == nil {
+		if value := local.Raw.Section(section).Option(option); value != "" {
+			return value
+		}
+	}
+
+	if global, err := config.LoadConfig(config.GlobalScope); err == nil {
+		return global.Raw.Section(section).Option(option)
+	}
+
+	return ""
+}
+
 // Editor returns the command for editing commit messages, chosen as Git
 // chooses it: $GIT_EDITOR, core.editor from the repository's and then the
 // user's Git configuration, $VISUAL, $EDITOR, and finally vi (Notepad on
@@ -89,16 +106,8 @@ func (s *Store) Editor() string {
 		return editor
 	}
 
-	if local, err := s.repo.Config(); err == nil {
-		if editor := local.Raw.Section("core").Option("editor"); editor != "" {
-			return editor
-		}
-	}
-
-	if global, err := config.LoadConfig(config.GlobalScope); err == nil {
-		if editor := global.Raw.Section("core").Option("editor"); editor != "" {
-			return editor
-		}
+	if editor := s.GitOption("core", "editor"); editor != "" {
+		return editor
 	}
 
 	for _, variable := range []string{"VISUAL", "EDITOR"} {

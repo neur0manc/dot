@@ -62,21 +62,25 @@ func editCommitMessage(s *store.Store) (string, error) {
 }
 
 // runEditor opens filename in editor, which may carry arguments, such as
-// "code --wait". Like Git, it lets the shell parse the command, except on
-// Windows, where it is split at spaces.
+// "code --wait".
 func runEditor(editor string, filename string) error {
-	var command *exec.Cmd
-
-	if runtime.GOOS == "windows" {
-		fields := strings.Fields(editor)
-		command = exec.Command(fields[0], append(fields[1:], filename)...)
-	} else {
-		command = exec.Command("sh", "-c", editor+` "$@"`, editor, filename)
-	}
-
+	command := shellCommand(editor, filename)
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 
 	return command.Run()
+}
+
+// shellCommand prepares a configured command line, such as an editor or a
+// pager, with extra arguments. Like Git, it lets the shell parse the command,
+// except on Windows, where it is split at spaces.
+func shellCommand(commandLine string, arguments ...string) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		fields := strings.Fields(commandLine)
+
+		return exec.Command(fields[0], append(fields[1:], arguments...)...)
+	}
+
+	return exec.Command("sh", append([]string{"-c", commandLine + ` "$@"`, commandLine}, arguments...)...)
 }
