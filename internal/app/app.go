@@ -117,6 +117,7 @@ func commands() []command {
 		{"list", "[<path>...]", "List tracked files and variants, or those at or beneath paths", runList},
 		{"status", "", "Show staged and modified tracked files", runStatus},
 		{"diff", "[--staged]", "Show changes in tracked files", runDiff},
+		{"log", "[--oneline] [-n <count>] [--color=<when>] [--no-pager]", "Show the commit history, through your Git pager", runLog},
 		{"commit", "[-m <message>]", "Commit staged changes; without -m, write the message in your editor", runCommit},
 		{"checkout", "[--force]", "Restore tracked files from the last commit", runCheckout},
 		{"config", "<user.name|user.email|local.class> [value]", "Read or set the commit identity or machine class", runConfig},

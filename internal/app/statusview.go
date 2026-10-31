@@ -17,15 +17,17 @@ const (
 	colorReset = "\x1b[0m"
 )
 
-// supportsColor reports whether w is a terminal and colors are not disabled
-// with NO_COLOR.
-func supportsColor(w io.Writer) bool {
+// isTerminal reports whether w is a terminal.
+func isTerminal(w io.Writer) bool {
 	file, ok := w.(*os.File)
-	if !ok || os.Getenv("NO_COLOR") != "" {
-		return false
-	}
 
-	return term.IsTerminal(int(file.Fd()))
+	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+// supportsColor reports whether w is a terminal that takes colors, and
+// colors are not disabled with NO_COLOR.
+func supportsColor(w io.Writer) bool {
+	return isTerminal(w) && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
 }
 
 func codeLabel(code store.Code) string {

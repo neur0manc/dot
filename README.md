@@ -47,6 +47,7 @@ environment variables are now called `DOT_…` instead of `DOTMGR_…`.
     dot add -u                    # stage all changes to tracked files
     dot ls .                      # tracked files here and below
     dot diff
+    dot log --oneline -5          # the last five commits
     dot commit -m "add vim config"
     dot remote add origin <url>
     dot push
@@ -162,6 +163,14 @@ the message, chosen as git chooses it: `GIT_EDITOR`, then `core.editor` from
 the repository's and your global git configuration, then `VISUAL`, then
 `EDITOR`. `DOT_HOME` and `DOT_REPO` override
 the working tree and git directory locations.
+
+`dot log` shows the history in git's format (`--oneline` for one line per
+commit, `-n <count>` or `-<count>` to limit it). on a terminal the output goes
+through a pager, chosen as git chooses it: `GIT_PAGER`, then `core.pager`,
+then `PAGER`, then `less`; an empty value or `cat` turns it off, as does
+`--no-pager`. it is colored if `color.ui` says so, or if it is `auto` (the
+default) and the output is a terminal that takes colors and `NO_COLOR` is
+not set; `--color=always|auto|never` overrides all of that.
 
 ## banter
 
