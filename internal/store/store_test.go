@@ -569,6 +569,12 @@ func TestCloneConflictKeepsRepositoryUntilForced(t *testing.T) {
 		t.Fatal("conflicting clone must keep the repository and the file")
 	}
 
+	// The conflicting file must be reviewable, and only that file.
+	diffs, err := clone.Diff(false)
+	if err != nil || len(diffs) != 1 || diffs[0].Path != ".rc" {
+		t.Fatalf("diff after conflicting clone: %v %v", diffs, err)
+	}
+
 	if _, err := clone.Checkout(true); err != nil {
 		t.Fatalf("forced checkout: %v", err)
 	}

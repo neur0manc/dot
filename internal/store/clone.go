@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	git "github.com/go-git/go-git/v5"
 )
@@ -67,5 +68,35 @@ func Clone(
 
 	result, err := store.Checkout(false)
 
+	var conflict *ConflictError
+	if errors.As(err, &conflict) {
+		// Nothing was written, but the index must still describe HEAD.
+		// Otherwise the repository would look as if every file had been
+		// deleted, and diff would show nothing to review.
+		if indexErr := store.resetIndexToHead(); indexErr != nil {
+			return store, result, errors.Join(err, indexErr)
+		}
+	}
+
 	return store, result, err
+}
+
+// resetIndexToHead makes the index list exactly the files of HEAD, leaving
+// the working tree alone.
+func (s *Store) resetIndexToHead() error {
+	head, err := s.headFiles()
+	if err != nil {
+		return err
+	}
+
+	idx, err := s.loadIndex()
+	if err != nil {
+		return err
+	}
+
+	for name, entry := range head {
+		setEntry(idx, name, entry.hash, entry.mode, 0, time.Time{})
+	}
+
+	return s.saveIndex(idx)
 }
